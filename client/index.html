@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>duo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: #0a0a0a; color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      overflow: hidden;
+    }
+
+    #remote {
+      position: fixed; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+      background: #111;
+    }
+
+    #local {
+      position: fixed; bottom: 80px; right: 16px;
+      width: 160px; height: 90px;
+      border-radius: 10px;
+      object-fit: cover;
+      background: #222;
+      cursor: grab;
+      z-index: 10;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    }
+    #local:active { cursor: grabbing; }
+
+    #controls {
+      position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 16px; padding: 16px 28px 20px;
+      background: linear-gradient(transparent, rgba(0,0,0,0.65));
+      border-radius: 24px 24px 0 0;
+      z-index: 20;
+      transition: opacity 0.4s ease;
+    }
+
+    .ctrl-btn {
+      width: 52px; height: 52px; border-radius: 50%; border: none;
+      background: rgba(255,255,255,0.15);
+      backdrop-filter: blur(8px);
+      color: #fff; cursor: pointer; font-size: 20px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s, transform 0.1s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .ctrl-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.05); }
+    .ctrl-btn.muted { background: rgba(220,50,50,0.75); }
+    #btn-hangup { background: rgba(220,50,50,0.85); }
+    #btn-hangup:hover { background: rgba(220,50,50,1); }
+
+    #overlay {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 20px;
+      z-index: 30;
+      background: rgba(10,10,10,0.88);
+      backdrop-filter: blur(16px);
+      transition: opacity 0.3s;
+    }
+    #overlay.hidden { display: none; }
+
+    #overlay-title {
+      font-size: 52px; font-weight: 700;
+      letter-spacing: -2.5px; line-height: 1;
+    }
+
+    #overlay-sub {
+      font-size: 15px; color: rgba(255,255,255,0.45);
+      text-align: center; max-width: 280px; line-height: 1.6;
+    }
+
+    #key-input-wrap {
+      display: flex; flex-direction: column; gap: 10px; width: 280px;
+    }
+    #key-input-wrap.hidden { display: none; }
+
+    #key-input {
+      width: 100%; padding: 12px 16px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.07);
+      color: #fff; font-size: 14px; font-family: monospace;
+      letter-spacing: 1px; outline: none;
+      transition: border-color 0.2s;
+    }
+    #key-input:focus { border-color: rgba(255,255,255,0.45); }
+    #key-input::placeholder { color: rgba(255,255,255,0.3); letter-spacing: 0; }
+
+    .primary-btn {
+      width: 100%; padding: 13px;
+      border-radius: 10px; border: none;
+      background: #fff; color: #000;
+      font-size: 15px; font-weight: 600;
+      cursor: pointer; transition: opacity 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .primary-btn:hover { opacity: 0.85; }
+    .primary-btn.hidden { display: none; }
+
+    #footer {
+      position: fixed; bottom: 6px; left: 50%; transform: translateX(-50%);
+      font-size: 11px; color: rgba(255,255,255,0.3);
+      z-index: 5; pointer-events: none; letter-spacing: 0.3px;
+      white-space: nowrap;
+    }
+
+    #unmute-overlay {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.45); z-index: 25; cursor: pointer;
+    }
+    #unmute-overlay.hidden { display: none; }
+    #unmute-overlay span {
+      font-size: 17px; background: rgba(0,0,0,0.55);
+      padding: 12px 24px; border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <video id="remote" autoplay playsinline></video>
+  <video id="local" autoplay playsinline muted></video>
+
+  <div id="overlay">
+    <span id="overlay-title">duo</span>
+    <p id="overlay-sub">One room. Just you two.</p>
+    <div id="key-input-wrap" class="hidden">
+      <input id="key-input" type="password" placeholder="paste your pair key" autocomplete="off" spellcheck="false" />
+      <button id="key-submit" class="primary-btn">connect</button>
+    </div>
+    <button id="retry-btn" class="primary-btn hidden">try again</button>
+  </div>
+
+  <div id="unmute-overlay" class="hidden">
+    <span>tap to unmute</span>
+  </div>
+
+  <div id="controls">
+    <button class="ctrl-btn" id="btn-mic" title="Toggle mic">🎤</button>
+    <button class="ctrl-btn" id="btn-cam" title="Toggle camera">📷</button>
+    <button class="ctrl-btn" id="btn-hangup" title="Hang up">📵</button>
+  </div>
+
+  <div id="footer"></div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
