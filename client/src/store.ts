@@ -1,13 +1,23 @@
 import type { ClientState } from './types.js';
 
 const initialState: ClientState = {
-  phase: 'idle',
+  phase: 'connecting',
+  peerId: null,
+  peerPresence: 'disconnected',
+
   localStream: null,
   remoteStream: null,
+
   micMuted: false,
   camOff: false,
+  screenSharing: false,
+
+  cameras: [],
+  currentCameraId: null,
+
+  rtcConnected: false,
   connectionType: 'unknown',
-  peerId: null,
+
   lastError: null,
 };
 

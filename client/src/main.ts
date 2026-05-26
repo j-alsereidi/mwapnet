@@ -1,151 +1,187 @@
 import { store } from './store.js';
 import { getPairSecret, clearPairSecret } from './auth.js';
-import { acquireLocalStream, setMicMuted, setCamOff } from './media.js';
+import { MediaManager } from './media.js';
 import { connectSignal, type SignalClient } from './signalClient.js';
 import { startRtcSession, type RtcSession } from './rtcSession.js';
 import { fetchIceConfig } from './iceConfigClient.js';
 import { mountUi } from './ui.js';
 import type { IceServerConfig, PeerId } from './types.js';
 
-let pairSecret = '';
+// ── Module-scope singletons ──────────────────────────────────────────────────
+const media = new MediaManager();
 let signalClient: SignalClient | null = null;
 let rtcSession: RtcSession | null = null;
+let iceConfig: IceServerConfig | null = null;
+let peerId: PeerId | null = null;
+// Signal messages that arrive before rtcSession exists get held here
+const queuedSignals: unknown[] = [];
 
-// Mount UI before bootstrap so handlers are live immediately
-mountUi({ onMicToggle, onCamToggle, onHangup, onRetry: () => { bootstrap(); } });
+// ── UI handlers ──────────────────────────────────────────────────────────────
+mountUi({
+  onMicToggle:   handleMicToggle,
+  onCamToggle:   handleCamToggle,
+  onCameraPick:  handleCameraPick,
+  onEnterRoom:   () => setMyState('room'),
+  onLeaveRoom:   () => setMyState('lobby'),
+  onScreenShare: handleScreenShare,
+  onRetry:       () => { void bootstrap(); },
+});
 
-// iOS Safari: getUserMedia requires a user gesture. On first load we show
-// the overlay — the user clicking "connect" provides that gesture.
-bootstrap();
+void bootstrap();
 
-export async function bootstrap(): Promise<void> {
-  store.set({ phase: 'idle', lastError: null, connectionType: 'unknown' });
+// ── Bootstrap ────────────────────────────────────────────────────────────────
+async function bootstrap(): Promise<void> {
+  store.set({ phase: 'connecting', lastError: null, peerPresence: 'disconnected' });
 
+  // 1. Pair secret
+  let pairSecret: string;
+  try { pairSecret = await getPairSecret(); }
+  catch { return fail('Could not read pair key.'); }
+
+  // 2. Camera + mic. Browser requires HTTPS context (ngrok provides this).
   try {
-    pairSecret = await getPairSecret();
-  } catch {
-    store.set({ phase: 'failed', lastError: 'Could not read pair key.' });
-    return;
-  }
-
-  // Acquire camera + mic
-  let localStream: MediaStream;
-  try {
-    localStream = await acquireLocalStream();
+    await media.acquire();
   } catch (err) {
-    const name = err instanceof Error ? err.name : '';
-    if (name === 'NotFoundError') {
-      store.set({ phase: 'failed', lastError: 'No camera or mic detected.' });
-    } else {
-      store.set({ phase: 'failed', lastError: 'duo needs camera and mic to work.' });
-    }
-    return;
+    return fail(
+      (err as Error).name === 'NotFoundError'
+        ? 'No camera or mic detected.'
+        : 'duo needs camera and mic to work.'
+    );
   }
 
-  store.set({ localStream });
-  (document.getElementById('local') as HTMLVideoElement).srcObject = localStream;
+  // Reflect the acquired stream into the store + enumerate cameras
+  store.set({ localStream: media.getStream(), currentCameraId: media.currentCamera() });
+  try {
+    store.set({ cameras: await media.listCameras() });
+  } catch { /* device enumeration is non-critical */ }
 
-  // Fetch ICE servers (STUN + TURN credentials)
-  let iceConfig: IceServerConfig;
+  // 3. ICE servers. Failure here is non-fatal — fall back to public STUN.
   try {
     iceConfig = await fetchIceConfig({ baseUrl: location.origin, pairSecret });
   } catch (err) {
-    console.warn('[main] TURN unavailable, falling back to STUN only:', err);
-    // Proceed with Google STUN; direct connections still work for ~85% of NAT pairs
+    console.warn('[main] ICE config fetch failed, using STUN-only fallback:', err);
     iceConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], ttlSeconds: 600 };
   }
 
-  // Open signaling WebSocket
-  store.set({ phase: 'connecting-signal' });
+  // 4. Open the signaling WebSocket. The hello message will move us to lobby.
   const wsUrl = location.origin.replace(/^http/, 'ws') + '/signal';
   signalClient?.close();
   signalClient = connectSignal({ url: wsUrl, pairSecret });
+  signalClient.onMessage(handleServerMessage);
+}
 
-  let peerId: PeerId | null = null;
-  let sessionStarted = false;
-  // Buffer any signal messages that arrive before rtcSession is wired up
-  const pendingSignals: unknown[] = [];
+// ── Server message routing ───────────────────────────────────────────────────
+function handleServerMessage(msg: import('./types.js').ServerMessage): void {
+  console.log('[signal] recv', msg.type);
+  switch (msg.type) {
+    case 'hello':
+      peerId = msg.you;
+      console.log(`[signal] hello — you are ${peerId}, peer is ${msg.peerPresence}`);
+      store.set({ peerId, peerPresence: msg.peerPresence, phase: 'lobby' });
+      reconcileRtc();
+      break;
 
-  signalClient.onMessage((msg) => {
-    console.log('[signal] recv', msg.type);
-    switch (msg.type) {
-      case 'hello': {
-        peerId = msg.you;
-        console.log(`[signal] hello — you are ${peerId}, peerPresent=${msg.peerPresent}`);
-        store.set({ peerId, phase: msg.peerPresent ? 'negotiating' : 'waiting-for-peer' });
-        if (msg.peerPresent && !sessionStarted) startSession(localStream, iceConfig);
-        break;
-      }
-      case 'peer-joined': {
-        console.log('[signal] peer-joined');
-        store.set({ phase: 'negotiating' });
-        if (!sessionStarted) startSession(localStream, iceConfig);
-        break;
-      }
-      case 'peer-left': {
-        console.log('[signal] peer-left');
-        teardownRtc();
-        store.set({ phase: 'waiting-for-peer', remoteStream: null, connectionType: 'unknown' });
-        (document.getElementById('remote') as HTMLVideoElement).srcObject = null;
-        break;
-      }
-      case 'signal': {
-        if (rtcSession) rtcSession.ingestSignal(msg.data);
-        else pendingSignals.push(msg.data);
-        break;
-      }
-      case 'error': {
-        console.warn('[signal] error', msg.code, msg.message);
-        if (msg.code === 'unauthorized') {
-          clearPairSecret();
-          store.set({ phase: 'failed', lastError: 'Invalid pair key. Check your key and try again.' });
-        }
-        break;
-      }
-    }
-  });
+    case 'peer-state':
+      console.log(`[signal] peer-state — peer is now ${msg.state}`);
+      store.set({ peerPresence: msg.state });
+      reconcileRtc();
+      break;
 
-  function startSession(stream: MediaStream, ice: IceServerConfig) {
-    if (!peerId || sessionStarted || !signalClient) return;
-    sessionStarted = true;
-    teardownRtc();
-    rtcSession = startRtcSession({
-      initiator: peerId === 'A', // A is always the offerer — deterministic, eliminates glare
-      localStream: stream,
-      iceConfig: ice,
-      signal: signalClient,
-    });
-    // Drain anything that arrived before rtcSession existed
-    while (pendingSignals.length) {
-      rtcSession.ingestSignal(pendingSignals.shift());
-    }
+    case 'signal':
+      if (rtcSession) rtcSession.ingestSignal(msg.data);
+      else queuedSignals.push(msg.data);
+      break;
+
+    case 'error':
+      console.warn('[signal] error', msg.code, msg.message);
+      if (msg.code === 'unauthorized') {
+        clearPairSecret();
+        fail('Invalid pair key. Check your key and try again.');
+      }
+      break;
+
+    case 'pong':
+      // no-op; just acknowledges our ping
+      break;
   }
 }
 
-function teardownRtc() {
-  rtcSession?.destroy();
-  rtcSession = null;
+// ── State transitions ────────────────────────────────────────────────────────
+function setMyState(state: 'lobby' | 'room'): void {
+  if (!signalClient) return;
+  const cur = store.get().phase;
+  if (cur !== 'lobby' && cur !== 'room') return;
+  signalClient.send({ type: 'state', state });
+  store.set({ phase: state });
+  reconcileRtc();
 }
 
-function onMicToggle() {
-  const { localStream, micMuted } = store.get();
-  if (!localStream) return;
-  const next = !micMuted;
-  setMicMuted(localStream, next);
+/**
+ * The only place the RTC session is created or destroyed.
+ * Active iff *both* peers are in 'room'.
+ */
+function reconcileRtc(): void {
+  const s = store.get();
+  const shouldRun = s.phase === 'room' && s.peerPresence === 'room';
+
+  if (shouldRun && !rtcSession) {
+    if (!peerId || !signalClient || !iceConfig) return;
+    console.log('[main] starting RTC session');
+    rtcSession = startRtcSession({
+      initiator: peerId === 'A', // Slot A always offers — deterministic, eliminates glare
+      media,
+      iceConfig,
+      signal: signalClient,
+    });
+    // Deliver any signal messages that landed before the session existed
+    while (queuedSignals.length) rtcSession.ingestSignal(queuedSignals.shift());
+  } else if (!shouldRun && rtcSession) {
+    console.log('[main] tearing down RTC session');
+    rtcSession.destroy();
+    rtcSession = null;
+    queuedSignals.length = 0;
+  }
+}
+
+// ── UI action handlers ───────────────────────────────────────────────────────
+function handleMicToggle(): void {
+  const next = !store.get().micMuted;
+  media.setMicMuted(next);
   store.set({ micMuted: next });
 }
 
-function onCamToggle() {
-  const { localStream, camOff } = store.get();
-  if (!localStream) return;
-  const next = !camOff;
-  setCamOff(localStream, next);
+function handleCamToggle(): void {
+  const next = !store.get().camOff;
+  media.setCamOff(next);
   store.set({ camOff: next });
 }
 
-function onHangup() {
-  signalClient?.send({ type: 'bye' });
-  teardownRtc();
-  store.set({ phase: 'waiting-for-peer', remoteStream: null, connectionType: 'unknown' });
-  (document.getElementById('remote') as HTMLVideoElement).srcObject = null;
+async function handleCameraPick(deviceId: string): Promise<void> {
+  try {
+    await media.switchCamera(deviceId);
+    store.set({ currentCameraId: media.currentCamera() });
+    // Re-apply camOff state to the new track
+    media.setCamOff(store.get().camOff);
+  } catch (err) {
+    console.warn('[main] switchCamera failed:', err);
+  }
+}
+
+async function handleScreenShare(): Promise<void> {
+  const sharing = store.get().screenSharing;
+  try {
+    if (sharing) await media.stopScreenShare();
+    else          await media.startScreenShare();
+    store.set({ screenSharing: media.isScreenSharing() });
+  } catch (err) {
+    // User cancelled the share picker — not an error worth surfacing
+    if ((err as Error).name !== 'NotAllowedError') {
+      console.warn('[main] screenshare failed:', err);
+    }
+    store.set({ screenSharing: media.isScreenSharing() });
+  }
+}
+
+function fail(message: string): void {
+  store.set({ phase: 'failed', lastError: message });
 }

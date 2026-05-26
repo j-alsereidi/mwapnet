@@ -12,76 +12,166 @@
       background: #0a0a0a; color: #fff;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       overflow: hidden;
-    }
-
-    #remote {
-      position: fixed; inset: 0;
-      width: 100%; height: 100%;
-      object-fit: cover;
-      background: #111;
-    }
-
-    #local {
-      position: fixed; bottom: 80px; right: 16px;
-      width: 160px; height: 90px;
-      border-radius: 10px;
-      object-fit: cover;
-      background: #222;
-      cursor: grab;
-      z-index: 10;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
-    }
-    #local:active { cursor: grabbing; }
-
-    #controls {
-      position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
-      display: flex; gap: 16px; padding: 16px 28px 20px;
-      background: linear-gradient(transparent, rgba(0,0,0,0.65));
-      border-radius: 24px 24px 0 0;
-      z-index: 20;
-      transition: opacity 0.4s ease;
-    }
-
-    .ctrl-btn {
-      width: 52px; height: 52px; border-radius: 50%; border: none;
-      background: rgba(255,255,255,0.15);
-      backdrop-filter: blur(8px);
-      color: #fff; cursor: pointer; font-size: 20px;
-      display: flex; align-items: center; justify-content: center;
-      transition: background 0.15s, transform 0.1s;
       -webkit-tap-highlight-color: transparent;
     }
-    .ctrl-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.05); }
-    .ctrl-btn.muted { background: rgba(220,50,50,0.75); }
-    #btn-hangup { background: rgba(220,50,50,0.85); }
-    #btn-hangup:hover { background: rgba(220,50,50,1); }
 
-    #overlay {
-      position: fixed; inset: 0;
-      display: flex; align-items: center; justify-content: center;
-      flex-direction: column; gap: 20px;
-      z-index: 30;
-      background: rgba(10,10,10,0.88);
-      backdrop-filter: blur(16px);
-      transition: opacity 0.3s;
+    /* ── Screen system ─────────────────────────────────────────────────── */
+    .screen { position: fixed; inset: 0; display: none; }
+    .screen.active { display: flex; }
+
+    /* ── Connecting / failed splash ────────────────────────────────────── */
+    #screen-connecting,
+    #screen-failed,
+    #screen-auth {
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      background: #0a0a0a;
+      z-index: 50;
     }
-    #overlay.hidden { display: none; }
-
-    #overlay-title {
+    .title {
       font-size: 52px; font-weight: 700;
       letter-spacing: -2.5px; line-height: 1;
     }
-
-    #overlay-sub {
-      font-size: 15px; color: rgba(255,255,255,0.45);
-      text-align: center; max-width: 280px; line-height: 1.6;
+    .sub {
+      font-size: 15px; color: rgba(255,255,255,0.5);
+      text-align: center; max-width: 320px; line-height: 1.6;
     }
 
+    /* ── Lobby ──────────────────────────────────────────────────────────── */
+    #screen-lobby {
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      gap: 20px;
+      background: #0a0a0a;
+    }
+    .lobby-card {
+      width: 100%; max-width: 480px;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    #lobby-preview {
+      width: 100%; aspect-ratio: 16 / 9;
+      background: #1a1a1a; border-radius: 12px;
+      object-fit: cover;
+      transform: scaleX(-1); /* mirror — feels natural for self-view */
+    }
+    .lobby-row {
+      display: flex; gap: 12px; align-items: center; justify-content: center;
+    }
+    #camera-picker {
+      flex: 1;
+      padding: 11px 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.05);
+      color: #fff; font-size: 14px;
+      outline: none;
+    }
+    #camera-picker:focus { border-color: rgba(255,255,255,0.4); }
+    .lobby-status {
+      text-align: center;
+      font-size: 14px;
+      color: rgba(255,255,255,0.55);
+      letter-spacing: 0.2px;
+    }
+    .lobby-status.peer-room   { color: #6fdc8c; }
+    .lobby-status.peer-lobby  { color: #ffd166; }
+
+    /* ── Room ───────────────────────────────────────────────────────────── */
+    #screen-room { background: #0a0a0a; }
+    #remote {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover; background: #111;
+    }
+    #remote.hidden { visibility: hidden; }
+    #local {
+      position: absolute; bottom: 88px; right: 16px;
+      width: 144px; height: 96px;
+      border-radius: 10px;
+      object-fit: cover;
+      background: #222;
+      cursor: grab; z-index: 10;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+      transform: scaleX(-1);
+    }
+    #local:active { cursor: grabbing; }
+    /* Don't mirror the local view while screensharing — the user wants to read text */
+    #local.screen { transform: none; }
+
+    .room-overlay {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      font-size: 17px;
+      color: rgba(255,255,255,0.65);
+      pointer-events: none;
+      letter-spacing: 0.2px;
+    }
+    .room-overlay.hidden { display: none; }
+
+    .lobby-banner {
+      position: absolute;
+      top: 12px; left: 50%; transform: translateX(-50%);
+      padding: 6px 14px;
+      background: rgba(255,209,102,0.18);
+      color: #ffd166;
+      border-radius: 999px;
+      font-size: 12px;
+      letter-spacing: 0.3px;
+      backdrop-filter: blur(8px);
+      z-index: 8;
+    }
+    .lobby-banner.hidden { display: none; }
+
+    /* ── Controls bar (shared between lobby and room) ──────────────────── */
+    .controls {
+      position: absolute;
+      bottom: 16px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 12px;
+      padding: 10px 16px;
+      background: rgba(0,0,0,0.5);
+      border-radius: 999px;
+      backdrop-filter: blur(12px);
+      z-index: 20;
+    }
+    #screen-room .controls {
+      transition: opacity 0.3s ease;
+    }
+
+    .ctrl-btn {
+      width: 48px; height: 48px;
+      border-radius: 50%; border: none;
+      background: rgba(255,255,255,0.13);
+      color: #fff; cursor: pointer;
+      font-size: 20px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .ctrl-btn:hover  { background: rgba(255,255,255,0.22); transform: scale(1.05); }
+    .ctrl-btn.muted  { background: rgba(220,50,50,0.75); }
+    .ctrl-btn.active { background: rgba(80,160,255,0.75); }
+
+    .ctrl-btn.primary {
+      width: auto;
+      padding: 0 18px;
+      border-radius: 24px;
+      font-size: 15px;
+      font-weight: 600;
+      background: #fff; color: #000;
+    }
+    .ctrl-btn.primary:hover { background: #f0f0f0; transform: scale(1.03); }
+    .ctrl-btn.danger { background: rgba(220,50,50,0.85); }
+    .ctrl-btn.danger:hover { background: rgba(220,50,50,1); }
+
+    /* ── Auth gate ──────────────────────────────────────────────────────── */
     #key-input-wrap {
       display: flex; flex-direction: column; gap: 10px; width: 280px;
     }
-    #key-input-wrap.hidden { display: none; }
-
     #key-input {
       width: 100%; padding: 12px 16px;
       border-radius: 10px;
@@ -89,66 +179,106 @@
       background: rgba(255,255,255,0.07);
       color: #fff; font-size: 14px; font-family: monospace;
       letter-spacing: 1px; outline: none;
-      transition: border-color 0.2s;
     }
     #key-input:focus { border-color: rgba(255,255,255,0.45); }
-    #key-input::placeholder { color: rgba(255,255,255,0.3); letter-spacing: 0; }
-
     .primary-btn {
       width: 100%; padding: 13px;
       border-radius: 10px; border: none;
       background: #fff; color: #000;
       font-size: 15px; font-weight: 600;
-      cursor: pointer; transition: opacity 0.15s;
-      -webkit-tap-highlight-color: transparent;
+      cursor: pointer;
     }
     .primary-btn:hover { opacity: 0.85; }
-    .primary-btn.hidden { display: none; }
 
+    /* ── Footer (connection-type indicator) ────────────────────────────── */
     #footer {
-      position: fixed; bottom: 6px; left: 50%; transform: translateX(-50%);
-      font-size: 11px; color: rgba(255,255,255,0.3);
-      z-index: 5; pointer-events: none; letter-spacing: 0.3px;
-      white-space: nowrap;
+      position: absolute;
+      bottom: 4px; left: 50%; transform: translateX(-50%);
+      font-size: 11px;
+      color: rgba(255,255,255,0.3);
+      z-index: 5;
+      pointer-events: none;
+      letter-spacing: 0.3px;
     }
 
+    /* ── Tap-to-unmute overlay ─────────────────────────────────────────── */
     #unmute-overlay {
       position: fixed; inset: 0;
       display: flex; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.45); z-index: 25; cursor: pointer;
+      background: rgba(0,0,0,0.5); z-index: 25;
+      cursor: pointer;
     }
     #unmute-overlay.hidden { display: none; }
     #unmute-overlay span {
-      font-size: 17px; background: rgba(0,0,0,0.55);
+      font-size: 17px;
+      background: rgba(0,0,0,0.6);
       padding: 12px 24px; border-radius: 8px;
     }
   </style>
 </head>
 <body>
-  <video id="remote" autoplay playsinline></video>
-  <video id="local" autoplay playsinline muted></video>
 
-  <div id="overlay">
-    <span id="overlay-title">duo</span>
-    <p id="overlay-sub">One room. Just you two.</p>
-    <div id="key-input-wrap" class="hidden">
-      <input id="key-input" type="password" placeholder="paste your pair key" autocomplete="off" spellcheck="false" />
+  <!-- Auth gate (only when no pair key on hand) -->
+  <div id="screen-auth" class="screen">
+    <span class="title">duo</span>
+    <p class="sub">Paste your pair key to connect.</p>
+    <div id="key-input-wrap">
+      <input id="key-input" type="password" placeholder="pair key" autocomplete="off" spellcheck="false" />
       <button id="key-submit" class="primary-btn">connect</button>
     </div>
-    <button id="retry-btn" class="primary-btn hidden">try again</button>
   </div>
 
+  <!-- Connecting splash -->
+  <div id="screen-connecting" class="screen active">
+    <span class="title">duo</span>
+    <p class="sub">Connecting…</p>
+  </div>
+
+  <!-- Failed splash -->
+  <div id="screen-failed" class="screen">
+    <span class="title">duo</span>
+    <p id="failed-msg" class="sub"></p>
+    <button id="retry-btn" class="primary-btn" style="width:200px">try again</button>
+  </div>
+
+  <!-- Lobby -->
+  <div id="screen-lobby" class="screen">
+    <div class="lobby-card">
+      <video id="lobby-preview" autoplay playsinline muted></video>
+      <div class="lobby-row">
+        <select id="camera-picker"></select>
+      </div>
+      <div class="lobby-row">
+        <button class="ctrl-btn" id="lobby-btn-mic" title="Toggle mic">🎤</button>
+        <button class="ctrl-btn" id="lobby-btn-cam" title="Toggle camera">📷</button>
+        <button class="ctrl-btn primary" id="lobby-btn-enter">enter room</button>
+      </div>
+      <p id="lobby-status" class="lobby-status">No one's here.</p>
+    </div>
+  </div>
+
+  <!-- Room -->
+  <div id="screen-room" class="screen">
+    <video id="remote" autoplay playsinline></video>
+    <video id="local" autoplay playsinline muted></video>
+
+    <div id="lobby-banner" class="lobby-banner hidden">the other is in the lobby</div>
+    <div id="room-overlay" class="room-overlay hidden"></div>
+
+    <div class="controls">
+      <button class="ctrl-btn" id="room-btn-mic"    title="Toggle mic">🎤</button>
+      <button class="ctrl-btn" id="room-btn-cam"    title="Toggle camera">📷</button>
+      <button class="ctrl-btn" id="room-btn-screen" title="Share screen">🖥️</button>
+      <button class="ctrl-btn danger" id="room-btn-leave" title="Leave room">📵</button>
+    </div>
+
+    <div id="footer"></div>
+  </div>
+
+  <!-- Tap-to-unmute (autoplay block fallback) -->
   <div id="unmute-overlay" class="hidden">
     <span>tap to unmute</span>
   </div>
-
-  <div id="controls">
-    <button class="ctrl-btn" id="btn-mic" title="Toggle mic">🎤</button>
-    <button class="ctrl-btn" id="btn-cam" title="Toggle camera">📷</button>
-    <button class="ctrl-btn" id="btn-hangup" title="Hang up">📵</button>
-  </div>
-
-  <div id="footer"></div>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

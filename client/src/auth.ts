@@ -17,25 +17,27 @@ export async function getPairSecret(): Promise<string> {
   const stored = localStorage.getItem(LS_KEY);
   if (stored) return stored;
 
-  // 3. Manual entry via prompt UI
+  // 3. Manual entry via auth screen
   return new Promise((resolve) => {
-    const wrap = document.getElementById('key-input-wrap')!;
+    const authScreen = document.getElementById('screen-auth')!;
+    const connecting = document.getElementById('screen-connecting')!;
     const input = document.getElementById('key-input') as HTMLInputElement;
-    const btn = document.getElementById('key-submit') as HTMLButtonElement;
+    const btn   = document.getElementById('key-submit') as HTMLButtonElement;
 
-    wrap.classList.remove('hidden');
+    connecting.classList.remove('active');
+    authScreen.classList.add('active');
 
-    function submit() {
+    function submit(): void {
       const val = input.value.trim();
       if (!val) return;
       localStorage.setItem(LS_KEY, val);
-      wrap.classList.add('hidden');
+      authScreen.classList.remove('active');
+      connecting.classList.add('active');
       resolve(val);
     }
 
     btn.onclick = submit;
     input.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
-    // Delay focus to satisfy iOS gesture requirement
     setTimeout(() => input.focus(), 50);
   });
 }

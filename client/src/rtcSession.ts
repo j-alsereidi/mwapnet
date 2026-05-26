@@ -1,5 +1,6 @@
 import type { IceServerConfig, ConnectionType } from './types.js';
 import type { SignalClient } from './signalClient.js';
+import type { MediaManager } from './media.js';
 import { store } from './store.js';
 
 const NEGOTIATION_TIMEOUT_MS = 20_000;
@@ -19,7 +20,7 @@ type WireSignal =
 
 export function startRtcSession(opts: {
   initiator: boolean;
-  localStream: MediaStream;
+  media: MediaManager;
   iceConfig: IceServerConfig;
   signal: SignalClient;
 }): RtcSession {
@@ -27,27 +28,40 @@ export function startRtcSession(opts: {
   let iceRestartCount = 0;
   let iceRestartWindowStart = Date.now();
   let disconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  // ICE candidates that arrive before setRemoteDescription has run get queued
   const pendingRemoteCandidates: RTCIceCandidateInit[] = [];
   let remoteDescriptionSet = false;
 
-  console.log(`[rtc] creating RTCPeerConnection (initiator=${opts.initiator}, tracks=${opts.localStream.getTracks().length})`);
-
+  console.log(`[rtc] creating RTCPeerConnection (initiator=${opts.initiator})`);
   const pc = new RTCPeerConnection({ iceServers: opts.iceConfig.iceServers });
 
-  for (const track of opts.localStream.getTracks()) {
-    pc.addTrack(track, opts.localStream);
-  }
+  // Add tracks ONCE; track changes (camera switch, screenshare) happen via
+  // sender.replaceTrack(), which doesn't trigger renegotiation.
+  let videoSender: RTCRtpSender | null = null;
+  let audioSender: RTCRtpSender | null = null;
+  const videoTrack = opts.media.getVideoTrack();
+  const audioTrack = opts.media.getAudioTrack();
+  if (videoTrack) videoSender = pc.addTrack(videoTrack, opts.media.getStream());
+  if (audioTrack) audioSender = pc.addTrack(audioTrack, opts.media.getStream());
+
+  const stopMediaListener = opts.media.onChange(() => {
+    if (destroyed) return;
+    const v = opts.media.getVideoTrack();
+    const a = opts.media.getAudioTrack();
+    if (videoSender && videoSender.track !== v) {
+      void videoSender.replaceTrack(v).catch((e) => console.warn('[rtc] video replaceTrack failed:', e));
+    }
+    if (audioSender && audioSender.track !== a) {
+      void audioSender.replaceTrack(a).catch((e) => console.warn('[rtc] audio replaceTrack failed:', e));
+    }
+  });
 
   const negotiationDeadline = setTimeout(() => {
-    if (destroyed) return;
-    if (store.get().phase !== 'connected') {
-      console.warn('[rtc] negotiation timed out after 20s');
-      store.set({
-        phase: 'failed',
-        lastError: "Couldn't establish a connection. Your networks may need a TURN relay.",
-      });
-    }
+    if (destroyed || store.get().rtcConnected) return;
+    console.warn('[rtc] negotiation timed out after 20s');
+    store.set({
+      phase: 'failed',
+      lastError: "Couldn't establish a connection. Your networks may need a TURN relay.",
+    });
   }, NEGOTIATION_TIMEOUT_MS);
 
   pc.onicecandidate = (e) => {
@@ -60,11 +74,9 @@ export function startRtcSession(opts: {
     const [remoteStream] = e.streams;
     if (!remoteStream) return;
     console.log(`[rtc] remote track (${remoteStream.getTracks().length} tracks)`);
-    // Attach the stream now, but DO NOT flip phase to 'connected' yet —
-    // ontrack fires as soon as SDP is exchanged, long before media flows.
-    // Phase moves to 'connected' only when ICE actually connects.
+    // ontrack fires before media flows; the UI uses rtcConnected to decide
+    // when to actually show the video as "live".
     store.set({ remoteStream });
-    attachRemoteStream(remoteStream);
   };
 
   pc.oniceconnectionstatechange = () => {
@@ -73,15 +85,17 @@ export function startRtcSession(opts: {
     if (s === 'connected' || s === 'completed') {
       clearTimeout(negotiationDeadline);
       if (disconnectTimer) { clearTimeout(disconnectTimer); disconnectTimer = null; }
-      store.set({ phase: 'connected' });
+      store.set({ rtcConnected: true });
       void detectConnectionType(pc);
     } else if (s === 'disconnected') {
+      store.set({ rtcConnected: false });
       disconnectTimer = setTimeout(() => {
         if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
           tryIceRestart();
         }
       }, ICE_DISCONNECT_GRACE_MS);
     } else if (s === 'failed') {
+      store.set({ rtcConnected: false });
       tryIceRestart();
     }
   };
@@ -89,7 +103,6 @@ export function startRtcSession(opts: {
   pc.onsignalingstatechange = () => console.log(`[rtc] signaling state: ${pc.signalingState}`);
   pc.onicegatheringstatechange = () => console.log(`[rtc] ice gathering: ${pc.iceGatheringState}`);
 
-  // Initiator drives renegotiation (also handles ICE restart-triggered renegotiation later)
   pc.onnegotiationneeded = async () => {
     if (destroyed || !opts.initiator) return;
     try {
@@ -113,7 +126,6 @@ export function startRtcSession(opts: {
         console.log(`[rtc] signal IN: ${msg.type}`);
         await pc.setRemoteDescription({ type: msg.type, sdp: msg.sdp });
         remoteDescriptionSet = true;
-        // Drain any ICE candidates that arrived before the remote description
         while (pendingRemoteCandidates.length) {
           const c = pendingRemoteCandidates.shift()!;
           try { await pc.addIceCandidate(c); } catch (e) { console.warn('[rtc] queued ICE add failed:', e); }
@@ -164,24 +176,12 @@ export function startRtcSession(opts: {
     destroyed = true;
     clearTimeout(negotiationDeadline);
     if (disconnectTimer) clearTimeout(disconnectTimer);
+    stopMediaListener();
     try { pc.close(); } catch { /* already closed */ }
-    store.set({ remoteStream: null, connectionType: 'unknown' });
+    store.set({ remoteStream: null, rtcConnected: false, connectionType: 'unknown' });
   }
 
   return { destroy, ingestSignal: (data) => { void ingestSignal(data); } };
-}
-
-function attachRemoteStream(stream: MediaStream): void {
-  const video = document.getElementById('remote') as HTMLVideoElement;
-  video.srcObject = stream;
-  video.play().catch(() => {
-    const overlay = document.getElementById('unmute-overlay')!;
-    overlay.classList.remove('hidden');
-    overlay.onclick = () => {
-      video.play().catch(() => { /* user needs to retry */ });
-      overlay.classList.add('hidden');
-    };
-  });
 }
 
 async function detectConnectionType(pc: RTCPeerConnection): Promise<void> {

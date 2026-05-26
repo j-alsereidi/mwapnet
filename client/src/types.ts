@@ -1,12 +1,11 @@
 export type PeerId = 'A' | 'B';
-export type Phase =
-  | 'idle'
-  | 'connecting-signal'
-  | 'waiting-for-peer'
-  | 'negotiating'
-  | 'connected'
-  | 'reconnecting'
-  | 'failed';
+
+// What screen am I looking at?
+export type Phase = 'connecting' | 'lobby' | 'room' | 'failed';
+
+// Where is the other peer? (mirrored from server)
+export type PeerPresence = 'disconnected' | 'lobby' | 'room';
+
 export type ConnectionType = 'direct' | 'relayed' | 'unknown';
 
 export interface IceServerConfig {
@@ -14,32 +13,43 @@ export interface IceServerConfig {
   ttlSeconds: number;
 }
 
+export interface CameraOption {
+  deviceId: string;
+  label: string;
+}
+
 export interface ClientState {
   phase: Phase;
+  peerId: PeerId | null;
+  peerPresence: PeerPresence;
+
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
+
   micMuted: boolean;
   camOff: boolean;
+  screenSharing: boolean;
+
+  cameras: CameraOption[];
+  currentCameraId: string | null;
+
+  rtcConnected: boolean;
   connectionType: ConnectionType;
-  peerId: PeerId | null;
+
   lastError: string | null;
 }
 
-export type SignalEnvelope =
-  | HelloMsg
-  | PeerJoinedMsg
-  | PeerLeftMsg
-  | SignalMsg
-  | ByeMsg
-  | PingMsg
-  | PongMsg
-  | ErrorMsg;
+// ── Wire protocol ───────────────────────────────────────────────────────────
+// Server → client messages
+export type ServerMessage =
+  | { type: 'hello'; you: PeerId; peerPresence: PeerPresence }
+  | { type: 'peer-state'; state: PeerPresence }
+  | { type: 'signal'; data: unknown }
+  | { type: 'pong'; nonce: number }
+  | { type: 'error'; code: string; message: string };
 
-export interface HelloMsg { type: 'hello'; you: PeerId; peerPresent: boolean; serverTime: number }
-export interface PeerJoinedMsg { type: 'peer-joined' }
-export interface PeerLeftMsg { type: 'peer-left'; reason: 'disconnect' | 'replaced' | 'bye' }
-export interface SignalMsg { type: 'signal'; data: unknown }
-export interface ByeMsg { type: 'bye' }
-export interface PingMsg { type: 'ping'; nonce: number }
-export interface PongMsg { type: 'pong'; nonce: number }
-export interface ErrorMsg { type: 'error'; code: string; message: string }
+// Client → server messages
+export type ClientMessage =
+  | { type: 'state'; state: 'lobby' | 'room' }
+  | { type: 'signal'; data: unknown }
+  | { type: 'ping'; nonce: number };

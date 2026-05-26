@@ -1,8 +1,14 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'node:http';
 import { identifyPeer, type PeerId } from './auth.js';
-import { attach, detach, otherSocket, isPeerPresent } from './pairState.js';
-import { parse } from './envelope.js';
+import {
+  attach,
+  detach,
+  setPresence,
+  getPresence,
+  otherSocket,
+} from './pairState.js';
+import { parseClientMessage } from './envelope.js';
 
 const HEARTBEAT_INTERVAL_MS = 20_000;
 const HEARTBEAT_TIMEOUT_MS = 45_000;
@@ -12,13 +18,9 @@ interface PeerMeta {
   peerId: PeerId;
   lastPongAt: number;
 }
+type DuoWebSocket = WebSocket & { __duo?: PeerMeta };
 
-interface TokenBucket {
-  count: number;
-  resetAt: number;
-}
-
-const buckets = new WeakMap<WebSocket, TokenBucket>();
+const buckets = new WeakMap<WebSocket, { count: number; resetAt: number }>();
 
 function checkMsgRate(ws: WebSocket): boolean {
   const now = Date.now();
@@ -45,7 +47,7 @@ function extractBearer(protocols: string): string | null {
   return null;
 }
 
-// Auth rate limiter: 5 attempts/min per IP, then blocked 5 min
+// Auth attempt limiter: 5 attempts/min per IP, then blocked 5 min
 const authRateMap = new Map<string, { count: number; blockedUntil: number }>();
 
 function checkAuthRate(ip: string): boolean {
@@ -58,23 +60,24 @@ function checkAuthRate(ip: string): boolean {
   return true;
 }
 
+function notifyPeerOfMyState(myPeerId: PeerId): void {
+  const other = otherSocket(myPeerId);
+  if (other) sendJson(other, { type: 'peer-state', state: getPresence(myPeerId) });
+}
+
 export function mountSignal(server: Server): void {
   const wss = new WebSocketServer({
     server,
     path: '/signal',
-    // Echo the bearer subprotocol back so browsers accept the upgrade
     handleProtocols: (protocols: Set<string>) => {
-      for (const p of protocols) {
-        if (p.startsWith('bearer.')) return p;
-      }
+      for (const p of protocols) if (p.startsWith('bearer.')) return p;
       return false;
     },
   });
 
-  // Heartbeat: ping every 20s, terminate if no pong within 45s
   const heartbeatInterval = setInterval(() => {
     for (const ws of wss.clients) {
-      const meta = (ws as WebSocket & { __duo?: PeerMeta }).__duo;
+      const meta = (ws as DuoWebSocket).__duo;
       if (!meta) continue;
       if (Date.now() - meta.lastPongAt > HEARTBEAT_TIMEOUT_MS) {
         ws.terminate();
@@ -86,7 +89,7 @@ export function mountSignal(server: Server): void {
 
   wss.on('close', () => clearInterval(heartbeatInterval));
 
-  wss.on('connection', (ws: WebSocket & { __duo?: PeerMeta }, req) => {
+  wss.on('connection', (ws: DuoWebSocket, req) => {
     const ip =
       (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ??
       req.socket.remoteAddress ??
@@ -98,8 +101,8 @@ export function mountSignal(server: Server): void {
       return;
     }
 
-    const rawProtocols = req.headers['sec-websocket-protocol'] ?? '';
-    const secret = extractBearer(rawProtocols);
+    const protocols = req.headers['sec-websocket-protocol'] ?? '';
+    const secret = extractBearer(protocols);
     if (!secret) {
       sendJson(ws, { type: 'error', code: 'unauthorized', message: 'Missing pair secret.' });
       ws.close(4001, 'unauthorized');
@@ -113,22 +116,16 @@ export function mountSignal(server: Server): void {
       return;
     }
 
-    // Successful auth resets the rate limit counter for this IP
     authRateMap.delete(ip);
-
     ws.__duo = { peerId, lastPongAt: Date.now() };
     attach(peerId, ws);
 
-    const peerPresent = isPeerPresent(peerId === 'A' ? 'B' : 'A');
-    console.log(`[signal] ${peerId} connected from ${ip} (peerPresent=${peerPresent})`);
-    sendJson(ws, { type: 'hello', you: peerId, peerPresent, serverTime: Date.now() });
+    const peerPresence = getPresence(peerId === 'A' ? 'B' : 'A');
+    console.log(`[signal] ${peerId} connected from ${ip} (peerPresence=${peerPresence})`);
 
-    if (peerPresent) {
-      // New arrival learns peer is here via hello.peerPresent; also send peer-joined for symmetry
-      sendJson(ws, { type: 'peer-joined' });
-      const other = otherSocket(peerId);
-      if (other) sendJson(other, { type: 'peer-joined' });
-    }
+    sendJson(ws, { type: 'hello', you: peerId, peerPresence });
+    // Tell the other peer that this one just arrived in the lobby
+    notifyPeerOfMyState(peerId);
 
     ws.on('pong', () => {
       if (ws.__duo) ws.__duo.lastPongAt = Date.now();
@@ -143,26 +140,38 @@ export function mountSignal(server: Server): void {
 
       let msg;
       try {
-        msg = parse(raw.toString());
+        msg = parseClientMessage(raw.toString());
       } catch {
         sendJson(ws, { type: 'error', code: 'malformed', message: 'Invalid message.' });
         return;
       }
 
-      if (msg.type === 'signal' || msg.type === 'bye') {
-        const other = otherSocket(peerId);
-        if (other) sendJson(other, msg);
-      } else if (msg.type === 'ping') {
-        sendJson(ws, { type: 'pong', nonce: msg.nonce });
+      switch (msg.type) {
+        case 'state': {
+          setPresence(peerId, msg.state);
+          console.log(`[signal] ${peerId} → ${msg.state}`);
+          notifyPeerOfMyState(peerId);
+          break;
+        }
+        case 'signal': {
+          // Pure relay — clients decide when sending signals is meaningful
+          const other = otherSocket(peerId);
+          if (other) sendJson(other, msg);
+          break;
+        }
+        case 'ping': {
+          sendJson(ws, { type: 'pong', nonce: msg.nonce });
+          break;
+        }
       }
-      // Server-to-client-only types are silently ignored if client sends them
     });
 
     ws.on('close', (code, reason) => {
       console.log(`[signal] ${peerId} disconnected (code=${code} reason=${reason.toString() || 'none'})`);
       detach(peerId, ws);
+      // Other peer needs to know — their presence axis for us is now 'disconnected'
       const other = otherSocket(peerId);
-      if (other) sendJson(other, { type: 'peer-left', reason: 'disconnect' });
+      if (other) sendJson(other, { type: 'peer-state', state: 'disconnected' });
     });
 
     ws.on('error', (err) => {

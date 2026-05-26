@@ -3,3 +3,5 @@ dist/
 .env
 .env.bat
 *.local
+app.md
+.claude/
