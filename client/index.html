@@ -266,6 +266,9 @@
     html.has-hover .ctrl-btn.primary:hover { background: rgba(255,255,255,0.10); transform: scale(1.03); }
     .ctrl-btn.primary .icon { width: 22px; height: 22px; }  /* ← enter-room icon size */
 
+    /* Flip-camera button is mobile-only — desktop has the camera picker dropdown */
+    html.has-hover #room-btn-flip { display: none; }
+
     /* ── Auth gate ──────────────────────────────────────────────────────── */
     #key-input-wrap {
       display: flex; flex-direction: column; gap: 10px; width: 280px;
@@ -368,6 +371,7 @@
       <button class="ctrl-btn" id="room-btn-mic"    title="Toggle mic"></button>
       <button class="ctrl-btn" id="room-btn-cam"    title="Toggle camera"></button>
       <button class="ctrl-btn" id="room-btn-screen" title="Share screen"></button>
+      <button class="ctrl-btn" id="room-btn-flip"   title="Flip camera"></button>
       <button class="ctrl-btn danger" id="room-btn-leave" title="Leave room"></button>
     </div>
 

@@ -24,6 +24,7 @@ mountUi({
   onEnterRoom:   () => setMyState('room'),
   onLeaveRoom:   () => setMyState('lobby'),
   onScreenShare: handleScreenShare,
+  onCameraFlip:  () => { void handleCameraFlip(); },
   onRetry:       () => { void bootstrap(); },
 });
 
@@ -165,6 +166,14 @@ async function handleCameraPick(deviceId: string): Promise<void> {
   } catch (err) {
     console.warn('[main] switchCamera failed:', err);
   }
+}
+
+async function handleCameraFlip(): Promise<void> {
+  const { cameras, currentCameraId } = store.get();
+  if (cameras.length < 2) return;
+  const idx = cameras.findIndex(c => c.deviceId === currentCameraId);
+  const next = cameras[(idx + 1) % cameras.length];
+  await handleCameraPick(next.deviceId);
 }
 
 async function handleScreenShare(): Promise<void> {

@@ -71,13 +71,17 @@ export class MediaManager {
    *  under the hood — the screen track stays in the video slot until stopped. */
   async switchCamera(deviceId: string): Promise<void> {
     if (deviceId === this.currentCameraId) return;
+    // Stop the old track BEFORE requesting the new camera. On mobile, two
+    // cameras cannot be open simultaneously — keeping the old one alive while
+    // calling getUserMedia for the new one causes the request to hang/freeze.
+    this.cameraTrack?.stop();
+    this.cameraTrack = null;
     const next = await navigator.mediaDevices.getUserMedia({
       video: { deviceId: { exact: deviceId } },
       audio: false,
     });
     const newTrack = next.getVideoTracks()[0];
     if (!newTrack) return;
-    this.cameraTrack?.stop();
     this.cameraTrack = newTrack;
     this.currentCameraId = deviceId;
     if (!this.screenTrack) this.rebuildStream();

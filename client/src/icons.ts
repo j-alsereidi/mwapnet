@@ -6,6 +6,7 @@ export const ICONS = {
   cam:    '/icons/camera.png',
   screen: '/icons/desktop.png',
   door:   '/icons/door.png',
+  flip:   '/icons/flip.png',
 } as const;
 
 export type IconName = typeof ICONS[keyof typeof ICONS];

@@ -31,6 +31,7 @@ export interface UiHandlers {
   onEnterRoom():   void;
   onLeaveRoom():   void;
   onScreenShare(): void;
+  onCameraFlip():  void;
   onRetry():       void;
 }
 
@@ -48,6 +49,7 @@ interface Dom {
   roomBtnMic:    HTMLButtonElement;
   roomBtnCam:    HTMLButtonElement;
   roomBtnScreen: HTMLButtonElement;
+  roomBtnFlip:   HTMLButtonElement;
   roomBtnLeave:  HTMLButtonElement;
   roomOverlay:   HTMLElement;
   lobbyBanner:   HTMLElement;
@@ -81,6 +83,7 @@ export function mountUi(handlers: UiHandlers): void {
     roomBtnMic:    document.getElementById('room-btn-mic')    as HTMLButtonElement,
     roomBtnCam:    document.getElementById('room-btn-cam')    as HTMLButtonElement,
     roomBtnScreen: document.getElementById('room-btn-screen') as HTMLButtonElement,
+    roomBtnFlip:   document.getElementById('room-btn-flip')   as HTMLButtonElement,
     roomBtnLeave:  document.getElementById('room-btn-leave')  as HTMLButtonElement,
     roomOverlay:   document.getElementById('room-overlay')!,
     lobbyBanner:   document.getElementById('lobby-banner')!,
@@ -98,6 +101,7 @@ export function mountUi(handlers: UiHandlers): void {
   dom.roomBtnMic.onclick    = handlers.onMicToggle;
   dom.roomBtnCam.onclick    = handlers.onCamToggle;
   dom.roomBtnScreen.onclick = handlers.onScreenShare;
+  dom.roomBtnFlip.onclick   = handlers.onCameraFlip;
   dom.roomBtnLeave.onclick  = handlers.onLeaveRoom;
   dom.retryBtn.onclick      = handlers.onRetry;
   dom.cameraPicker.onchange = () => handlers.onCameraPick(dom.cameraPicker.value);
@@ -117,6 +121,7 @@ export function mountUi(handlers: UiHandlers): void {
   dom.roomBtnMic.innerHTML    = iconHtml(ICONS.mic);
   dom.roomBtnCam.innerHTML    = iconHtml(ICONS.cam);
   dom.roomBtnScreen.innerHTML = iconHtml(ICONS.screen);
+  dom.roomBtnFlip.innerHTML   = iconHtml(ICONS.flip);
   dom.roomBtnLeave.innerHTML  = iconHtml(ICONS.door);
   dom.lobbyBtnEnter.innerHTML = `${iconHtml(ICONS.door)}<span>Enter</span>`;
 
@@ -179,19 +184,35 @@ function setupLocalPipDrag(): void {
   document.addEventListener('pointerup', () => { dragging = false; });
 }
 
-// Track the last attached stream so we don't redundantly rewrite srcObject
+// Track the last attached stream so we don't redundantly rewrite srcObject.
+// We also track the video track ID separately: on mobile, the stream object
+// stays the same after a camera switch (stable identity) but the underlying
+// track changes. Mobile browsers don't reactively repaint when tracks are
+// swapped on an existing stream — we must null + reassign srcObject.
 let lastLocalStreamId: string | null = null;
+let lastLocalVideoTrackId: string | null = null;
 let lastRemoteStreamId: string | null = null;
 
 function render(s: ClientState): void {
   // Active screen
   setActiveScreen(s.phase);
 
-  // Local video preview — both lobby and room reuse the same source
-  if (s.localStream && s.localStream.id !== lastLocalStreamId) {
+  // Local video preview — both lobby and room reuse the same source.
+  // Check video track ID too: after a camera switch the stream object is
+  // identical but the active track changes; mobile needs a null + reassign
+  // to actually repaint.
+  const localVideoTrackId = s.localStream?.getVideoTracks()[0]?.id ?? null;
+  if (s.localStream && (
+    s.localStream.id !== lastLocalStreamId ||
+    localVideoTrackId !== lastLocalVideoTrackId
+  )) {
+    dom.lobbyPreview.srcObject = null;
+    dom.localVideo.srcObject   = null;
     dom.lobbyPreview.srcObject = s.localStream;
     dom.localVideo.srcObject   = s.localStream;
-    lastLocalStreamId = s.localStream.id;
+    void dom.lobbyPreview.play().catch(() => {});
+    lastLocalStreamId      = s.localStream.id;
+    lastLocalVideoTrackId  = localVideoTrackId;
   }
 
   // Remote video — only show if RTC is actually connected
@@ -223,6 +244,7 @@ function render(s: ClientState): void {
     btn.title = s.camOff ? 'Turn camera on' : 'Turn camera off';
   }
   dom.roomBtnScreen.classList.toggle('active', s.screenSharing);
+  dom.roomBtnFlip.style.display = s.cameras.length >= 2 ? '' : 'none';
 
   // Lobby status text — three states per spec
   dom.lobbyStatus.classList.remove('peer-room', 'peer-lobby');
