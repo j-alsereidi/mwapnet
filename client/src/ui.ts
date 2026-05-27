@@ -1,5 +1,28 @@
 import { store } from './store.js';
 import type { ClientState, PeerPresence } from './types.js';
+import { ICONS, iconHtml } from './icons.js';
+
+// getDisplayMedia is absent on iOS Safari and some older mobile browsers.
+// The button is hidden on those platforms rather than silently failing.
+// Chrome on Android supports it and shows the button normally.
+const SCREEN_SHARE_SUPPORTED =
+  typeof navigator !== 'undefined' &&
+  !!navigator.mediaDevices &&
+  typeof (navigator.mediaDevices as MediaDevices & { getDisplayMedia?: unknown }).getDisplayMedia === 'function';
+
+// Detect a "real" pointer device (mouse / trackpad) so we can scope :hover
+// styles to it. Pure CSS `@media (hover: hover)` is unreliable — some
+// Android Chrome builds report it as truthy on touch devices, which causes
+// the synthetic :hover after a tap to stick and held the button at 0.7
+// opacity even after unmute. We require BOTH hover AND a fine pointer,
+// AND no touch capability, before opting in.
+const HAS_REAL_HOVER =
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(hover: hover)').matches &&
+  window.matchMedia('(pointer: fine)').matches &&
+  !window.matchMedia('(pointer: coarse)').matches &&
+  !('ontouchstart' in window);
 
 export interface UiHandlers {
   onMicToggle():   void;
@@ -79,8 +102,27 @@ export function mountUi(handlers: UiHandlers): void {
   dom.retryBtn.onclick      = handlers.onRetry;
   dom.cameraPicker.onchange = () => handlers.onCameraPick(dom.cameraPicker.value);
 
+  // Hide on platforms where getDisplayMedia is absent (iOS Safari, etc.)
+  if (!SCREEN_SHARE_SUPPORTED) dom.roomBtnScreen.style.display = 'none';
+
+  // Gate :hover styles on confirmed pointer devices only. CSS without this
+  // class never matches `.has-hover .ctrl-btn:hover`, so touch screens
+  // can't get stuck in a hover state.
+  if (HAS_REAL_HOVER) document.documentElement.classList.add('has-hover');
+
+  // Button icons are static — mute state is conveyed via the .muted class
+  // (red background), not by swapping the icon.
+  dom.lobbyBtnMic.innerHTML   = iconHtml(ICONS.mic);
+  dom.lobbyBtnCam.innerHTML   = iconHtml(ICONS.cam);
+  dom.roomBtnMic.innerHTML    = iconHtml(ICONS.mic);
+  dom.roomBtnCam.innerHTML    = iconHtml(ICONS.cam);
+  dom.roomBtnScreen.innerHTML = iconHtml(ICONS.screen);
+  dom.roomBtnLeave.innerHTML  = iconHtml(ICONS.door);
+  dom.lobbyBtnEnter.innerHTML = `${iconHtml(ICONS.door)}<span>Enter</span>`;
+
   setupRoomControlAutoFade();
   setupLocalPipDrag();
+  setupLocalAspectSync();
 
   store.subscribe(render);
   render(store.get());
@@ -95,6 +137,22 @@ function setupRoomControlAutoFade(): void {
   document.addEventListener('pointermove', reveal);
   document.addEventListener('pointerdown', reveal);
   reveal();
+}
+
+// Keep the PiP's aspect ratio glued to the underlying stream's intrinsic
+// dimensions. Width is fixed in CSS; height follows. Avoids a transparent
+// letterbox showing through the box-shadow when the camera's aspect ratio
+// (e.g. 4:3) differs from the default container shape.
+function setupLocalAspectSync(): void {
+  const v = dom.localVideo;
+  const sync = (): void => {
+    if (v.videoWidth && v.videoHeight) {
+      v.style.aspectRatio = `${v.videoWidth} / ${v.videoHeight}`;
+    }
+  };
+  v.addEventListener('loadedmetadata', sync);
+  // Fires when intrinsic size changes (camera switch, screenshare, etc.)
+  v.addEventListener('resize', sync);
 }
 
 function setupLocalPipDrag(): void {
@@ -155,15 +213,13 @@ function render(s: ClientState): void {
   // Camera dropdown
   syncCameraPicker(s);
 
-  // Mic / cam button states (shared between lobby + room)
+  // Mic / cam button states — icon is static; .muted class shows the state
   for (const btn of [dom.lobbyBtnMic, dom.roomBtnMic]) {
     btn.classList.toggle('muted', s.micMuted);
-    btn.textContent = s.micMuted ? '🔇' : '🎤';
     btn.title = s.micMuted ? 'Unmute' : 'Mute';
   }
   for (const btn of [dom.lobbyBtnCam, dom.roomBtnCam]) {
     btn.classList.toggle('muted', s.camOff);
-    btn.textContent = s.camOff ? '🚫' : '📷';
     btn.title = s.camOff ? 'Turn camera on' : 'Turn camera off';
   }
   dom.roomBtnScreen.classList.toggle('active', s.screenSharing);
@@ -171,10 +227,10 @@ function render(s: ClientState): void {
   // Lobby status text — three states per spec
   dom.lobbyStatus.classList.remove('peer-room', 'peer-lobby');
   if (s.peerPresence === 'room') {
-    dom.lobbyStatus.textContent = 'The other is in the meeting.';
+    dom.lobbyStatus.textContent = 'MWAP is in the meeting.';
     dom.lobbyStatus.classList.add('peer-room');
   } else if (s.peerPresence === 'lobby') {
-    dom.lobbyStatus.textContent = 'The other is in the lobby.';
+    dom.lobbyStatus.textContent = 'MWAP is getting ready to join.';
     dom.lobbyStatus.classList.add('peer-lobby');
   } else {
     dom.lobbyStatus.textContent = "No one's here.";
@@ -223,7 +279,7 @@ function roomOverlayText(peer: PeerPresence, rtcConnected: boolean): string | nu
   if (rtcConnected) return null;
   if (peer === 'room')         return 'Linking up…';
   if (peer === 'lobby')        return null; // banner covers it
-  return 'Waiting for the other one.';
+  return 'Waiting...';
 }
 
 function syncCameraPicker(s: ClientState): void {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>duo</title>
+  <title>MWAPNET</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -55,7 +55,7 @@
     #lobby-preview {
       width: 100%; aspect-ratio: 16 / 9;
       background: #1a1a1a; border-radius: 12px;
-      object-fit: cover;
+      object-fit: contain;
       transform: scaleX(-1); /* mirror — feels natural for self-view */
     }
     .lobby-row {
@@ -85,18 +85,30 @@
     #remote {
       position: absolute; inset: 0;
       width: 100%; height: 100%;
-      object-fit: cover; background: #111;
+      object-fit: contain; background: #111;
     }
     #remote.hidden { visibility: hidden; }
     #local {
       position: absolute; bottom: 88px; right: 16px;
-      width: 144px; height: 96px;
+      /* width is fixed; height comes from aspect-ratio (updated in ui.ts
+         once the stream's intrinsic dimensions are known) so the box hugs
+         the actual video — no transparent letterbox showing the shadow. */
+      width: 144px;
+      aspect-ratio: 16 / 9;
       border-radius: 10px;
       object-fit: cover;
-      background: #222;
       cursor: grab; z-index: 10;
       box-shadow: 0 4px 20px rgba(0,0,0,0.6);
       transform: scaleX(-1);
+      /* Without this, mobile browsers steal the touch for scrolling
+         after only a few pixels of movement, killing the drag. */
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    /* Desktop: restore the larger PiP; mobile keeps the compact 144 wide */
+    @media (min-width: 768px) {
+      #local { width: 240px; bottom: 96px; }
     }
     #local:active { cursor: grabbing; }
     /* Don't mirror the local view while screensharing — the user wants to read text */
@@ -144,18 +156,41 @@
     }
 
     .ctrl-btn {
-      width: 48px; height: 48px;
-      border-radius: 50%; border: none;
-      background: rgba(255,255,255,0.13);
+      /* ── ICON BUTTONS ──────────────────────────────────────────────────
+         Adjust icon SIZE:        .ctrl-btn .icon  { width / height }
+         Adjust button SPACING:   .controls        { gap / padding }
+         Adjust button HIT AREA:  .ctrl-btn        { width / height / padding }
+         Adjust button POSITION:  .controls        { bottom / left }
+      ─────────────────────────────────────────────────────────────────── */
+      width: 48px; height: 48px;  /* hit area — kept for finger-friendly tapping */
+      border-radius: 0; border: none;
+      background: transparent;
       color: #fff; cursor: pointer;
-      font-size: 20px;
       display: flex; align-items: center; justify-content: center;
-      transition: background 0.15s, transform 0.1s;
+      transition: opacity 0.15s, transform 0.1s;
     }
-    .ctrl-btn:hover  { background: rgba(255,255,255,0.22); transform: scale(1.05); }
-    .ctrl-btn.muted  { background: rgba(220,50,50,0.75); }
-    .ctrl-btn.active { background: rgba(80,160,255,0.75); }
+    /* Hover styles only apply when ui.ts has tagged <html> with .has-hover
+       (real pointer device). On touch screens the class is never added, so
+       these rules never match — no stuck synthetic :hover after a tap.
+       CSS `@media (hover: hover)` alone is unreliable: some Android Chrome
+       builds report it as true on touch-only devices. */
+    html.has-hover .ctrl-btn:hover { opacity: 0.7; transform: scale(1.08); }
+    /* Muted / off → dim the icon to 20% so the state is obvious at a glance */
+    .ctrl-btn.muted  { opacity: 0.2; }
+    /* Active (e.g. screensharing) → blue glow instead of a filled circle */
+    .ctrl-btn.active { filter: drop-shadow(0 0 7px rgba(80,160,255,0.95)); opacity: 1; }
 
+    /* ── Icon images ────────────────────────────────────────────────────
+       PRIMARY size knob: change the px values below.                    */
+    .ctrl-btn .icon {
+      width: 36px; height: 36px;  /* ← icon size */
+      display: block;
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+
+    /* ── "Enter room" pill (icon + text, not a bare icon button) ────── */
     .ctrl-btn.primary {
       width: auto;
       padding: 0 18px;
@@ -163,10 +198,12 @@
       font-size: 15px;
       font-weight: 600;
       background: #fff; color: #000;
+      gap: 8px;
+      opacity: 1;       /* never dim this one */
+      transition: background 0.15s, transform 0.1s;
     }
-    .ctrl-btn.primary:hover { background: #f0f0f0; transform: scale(1.03); }
-    .ctrl-btn.danger { background: rgba(220,50,50,0.85); }
-    .ctrl-btn.danger:hover { background: rgba(220,50,50,1); }
+    html.has-hover .ctrl-btn.primary:hover { background: #f0f0f0; transform: scale(1.03); }
+    .ctrl-btn.primary .icon { width: 22px; height: 22px; }  /* ← enter-room icon size */
 
     /* ── Auth gate ──────────────────────────────────────────────────────── */
     #key-input-wrap {
@@ -220,25 +257,25 @@
 
   <!-- Auth gate (only when no pair key on hand) -->
   <div id="screen-auth" class="screen">
-    <span class="title">duo</span>
+    <span class="title">MWAPNET</span>
     <p class="sub">Paste your pair key to connect.</p>
     <div id="key-input-wrap">
       <input id="key-input" type="password" placeholder="pair key" autocomplete="off" spellcheck="false" />
-      <button id="key-submit" class="primary-btn">connect</button>
+      <button id="key-submit" class="primary-btn">Connect</button>
     </div>
   </div>
 
   <!-- Connecting splash -->
   <div id="screen-connecting" class="screen active">
-    <span class="title">duo</span>
+    <span class="title">MWAPNET</span>
     <p class="sub">Connecting…</p>
   </div>
 
   <!-- Failed splash -->
   <div id="screen-failed" class="screen">
-    <span class="title">duo</span>
+    <span class="title">MWAPNET</span>
     <p id="failed-msg" class="sub"></p>
-    <button id="retry-btn" class="primary-btn" style="width:200px">try again</button>
+    <button id="retry-btn" class="primary-btn" style="width:200px">Try Again</button>
   </div>
 
   <!-- Lobby -->
@@ -249,9 +286,9 @@
         <select id="camera-picker"></select>
       </div>
       <div class="lobby-row">
-        <button class="ctrl-btn" id="lobby-btn-mic" title="Toggle mic">🎤</button>
-        <button class="ctrl-btn" id="lobby-btn-cam" title="Toggle camera">📷</button>
-        <button class="ctrl-btn primary" id="lobby-btn-enter">enter room</button>
+        <button class="ctrl-btn" id="lobby-btn-mic" title="Toggle mic"></button>
+        <button class="ctrl-btn" id="lobby-btn-cam" title="Toggle camera"></button>
+        <button class="ctrl-btn primary" id="lobby-btn-enter">Enter</button>
       </div>
       <p id="lobby-status" class="lobby-status">No one's here.</p>
     </div>
@@ -262,14 +299,14 @@
     <video id="remote" autoplay playsinline></video>
     <video id="local" autoplay playsinline muted></video>
 
-    <div id="lobby-banner" class="lobby-banner hidden">the other is in the lobby</div>
+    <div id="lobby-banner" class="lobby-banner hidden">MWAP is in the lobby</div>
     <div id="room-overlay" class="room-overlay hidden"></div>
 
     <div class="controls">
-      <button class="ctrl-btn" id="room-btn-mic"    title="Toggle mic">🎤</button>
-      <button class="ctrl-btn" id="room-btn-cam"    title="Toggle camera">📷</button>
-      <button class="ctrl-btn" id="room-btn-screen" title="Share screen">🖥️</button>
-      <button class="ctrl-btn danger" id="room-btn-leave" title="Leave room">📵</button>
+      <button class="ctrl-btn" id="room-btn-mic"    title="Toggle mic"></button>
+      <button class="ctrl-btn" id="room-btn-cam"    title="Toggle camera"></button>
+      <button class="ctrl-btn" id="room-btn-screen" title="Share screen"></button>
+      <button class="ctrl-btn danger" id="room-btn-leave" title="Leave room"></button>
     </div>
 
     <div id="footer"></div>

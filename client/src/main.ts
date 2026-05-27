@@ -45,7 +45,7 @@ async function bootstrap(): Promise<void> {
     return fail(
       (err as Error).name === 'NotFoundError'
         ? 'No camera or mic detected.'
-        : 'duo needs camera and mic to work.'
+        : 'MWAPNET needs camera and mic to work.'
     );
   }
 
