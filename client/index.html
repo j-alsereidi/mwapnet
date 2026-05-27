@@ -49,6 +49,44 @@
       background: #0a0a0a;
       overflow: hidden;
     }
+    /* ── Lobby wordmark ─────────────────────────────────────────────────── */
+    .lobby-title {
+      font-size: 52px; font-weight: 700;
+      letter-spacing: -2.5px; line-height: 1;
+      position: relative; z-index: 1;
+
+      /* Shimmer: gradient sweeps from left to right through the two
+         presence accent tones with bright-white peaks on either side. */
+      background: linear-gradient(
+        90deg,
+        rgba(255,255,255,0.55) 0%,
+        #ffffff          15%,
+        #d9c5a8          35%,
+        #ffffff          50%,
+        #b8a8c2          65%,
+        #ffffff          82%,
+        rgba(255,255,255,0.55) 100%
+      );
+      background-size: 300% 100%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+
+      /* Entrance (runs once) then hand off to the continuous shimmer */
+      animation:
+        lobby-title-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) both,
+        lobby-shimmer  7s linear 0.7s infinite;
+    }
+
+    @keyframes lobby-title-in {
+      from { opacity: 0; transform: translateY(-10px); }
+      to   { opacity: 1; transform: none; }
+    }
+    @keyframes lobby-shimmer {
+      0%   { background-position: 100% 50%; }
+      100% { background-position: -200% 50%; }
+    }
+
     /* Background image at 15% opacity, fitted (contain) not cropped (cover) */
     #screen-lobby::before {
       content: '';
@@ -223,6 +261,7 @@
       gap: 8px;
       opacity: 1;       /* never dim this one */
       transition: background 0.15s, transform 0.1s;
+	  font-family: 'Segoe UI';
     }
     html.has-hover .ctrl-btn.primary:hover { background: rgba(255,255,255,0.10); transform: scale(1.03); }
     .ctrl-btn.primary .icon { width: 22px; height: 22px; }  /* ← enter-room icon size */
@@ -302,6 +341,7 @@
 
   <!-- Lobby -->
   <div id="screen-lobby" class="screen">
+    <div class="lobby-title">MWAPNET</div>
     <div class="lobby-card">
       <video id="lobby-preview" autoplay playsinline muted></video>
       <div class="lobby-row">
@@ -312,7 +352,7 @@
         <button class="ctrl-btn" id="lobby-btn-cam" title="Toggle camera"></button>
         <button class="ctrl-btn primary" id="lobby-btn-enter">Enter</button>
       </div>
-      <p id="lobby-status" class="lobby-status">No one's here.</p>
+      <p id="lobby-status" class="lobby-status"></p>
     </div>
   </div>
 
