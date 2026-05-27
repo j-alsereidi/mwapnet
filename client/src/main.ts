@@ -64,6 +64,11 @@ async function bootstrap(): Promise<void> {
 
   // Reflect the acquired stream into the store + enumerate cameras
   store.set({ localStream: media.getStream(), currentCameraId: media.currentCamera() });
+
+  // Keep the dedicated screen stream in sync whenever media changes — covers
+  // the case where the user stops sharing via the OS bar (which fires the
+  // track's `ended` event and bypasses our button handler).
+  media.onChange(() => pushScreenStateToStore());
   try {
     store.set({ cameras: await media.listCameras() });
   } catch { /* device enumeration is non-critical */ }
@@ -234,14 +239,23 @@ async function handleScreenShare(): Promise<void> {
   try {
     if (sharing) await media.stopScreenShare();
     else          await media.startScreenShare();
-    store.set({ screenSharing: media.isScreenSharing() });
   } catch (err) {
     // User cancelled the share picker — not an error worth surfacing
     if ((err as Error).name !== 'NotAllowedError') {
       console.warn('[main] screenshare failed:', err);
     }
-    store.set({ screenSharing: media.isScreenSharing() });
   }
+  pushScreenStateToStore();
+}
+
+/** Build a *fresh* MediaStream wrapping just the screen track. Mobile browsers
+ *  are unreliable when video elements receive a mutated stream — a brand-new
+ *  stream object every time guarantees a clean rebind. */
+function pushScreenStateToStore(): void {
+  const sharing = media.isScreenSharing();
+  const track = media.getScreenTrack();
+  const screenStream = sharing && track ? new MediaStream([track]) : null;
+  store.set({ screenSharing: sharing, screenStream });
 }
 
 function fail(message: string): void {

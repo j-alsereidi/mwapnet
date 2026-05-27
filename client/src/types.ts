@@ -25,6 +25,10 @@ export interface ClientState {
 
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
+  // Dedicated stream wrapping just the screen-capture track, kept entirely
+  // separate from the camera PiP so screenshare display has zero entanglement
+  // with the camera's track-swap / hide logic.
+  screenStream: MediaStream | null;
 
   micMuted: boolean;
   camOff: boolean;

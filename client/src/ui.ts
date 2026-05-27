@@ -42,6 +42,7 @@ interface Dom {
   lobbyPreview:  HTMLVideoElement;
   remoteVideo:   HTMLVideoElement;
   localVideo:    HTMLVideoElement;
+  screenPip:     HTMLVideoElement;
   cameraPicker:  HTMLSelectElement;
   lobbyBtnMic:   HTMLButtonElement;
   lobbyBtnCam:   HTMLButtonElement;
@@ -79,6 +80,7 @@ export function mountUi(handlers: UiHandlers): void {
     lobbyPreview:  document.getElementById('lobby-preview') as HTMLVideoElement,
     remoteVideo:   document.getElementById('remote')        as HTMLVideoElement,
     localVideo:    document.getElementById('local')         as HTMLVideoElement,
+    screenPip:     document.getElementById('screen-pip')    as HTMLVideoElement,
     cameraPicker:  document.getElementById('camera-picker') as HTMLSelectElement,
     lobbyBtnMic:   document.getElementById('lobby-btn-mic') as HTMLButtonElement,
     lobbyBtnCam:   document.getElementById('lobby-btn-cam') as HTMLButtonElement,
@@ -153,6 +155,7 @@ export function mountUi(handlers: UiHandlers): void {
 
   setupRoomControlAutoFade();
   setupLocalPipDrag();
+  setupPipDrag(dom.screenPip);
   setupLocalAspectSync();
 
   store.subscribe(render);
@@ -187,7 +190,10 @@ function setupLocalAspectSync(): void {
 }
 
 function setupLocalPipDrag(): void {
-  const v = dom.localVideo;
+  setupPipDrag(dom.localVideo);
+}
+
+function setupPipDrag(v: HTMLVideoElement): void {
   let dragging = false;
   let offX = 0, offY = 0;
   v.addEventListener('pointerdown', (e) => {
@@ -218,6 +224,7 @@ function setupLocalPipDrag(): void {
 let lastLocalStreamId: string | null = null;
 let lastLocalVideoTrackId: string | null = null;
 let lastRemoteStreamId: string | null = null;
+let lastLocalHidden = false;
 
 function render(s: ClientState): void {
   // Active screen
@@ -236,7 +243,11 @@ function render(s: ClientState): void {
     dom.localVideo.srcObject   = null;
     dom.lobbyPreview.srcObject = s.localStream;
     dom.localVideo.srcObject   = s.localStream;
+    // The `autoplay` attribute only fires on initial load — after a srcObject
+    // swap (camera switch, screenshare start) the element stays paused
+    // unless we kick it. Same call for both elements so neither freezes.
     void dom.lobbyPreview.play().catch(() => {});
+    void dom.localVideo.play().catch(() => {});
     lastLocalStreamId      = s.localStream.id;
     lastLocalVideoTrackId  = localVideoTrackId;
   }
@@ -288,21 +299,30 @@ function render(s: ClientState): void {
   if (s.phase === 'room') {
     dom.lobbyBanner.classList.toggle('hidden', s.peerPresence !== 'lobby');
     setRoomOverlay(s);
-    dom.localVideo.classList.toggle('screen', s.screenSharing);
   } else {
     // Settings menu only makes sense in the room — auto-close on leave.
     dom.settingsMenu.classList.add('hidden');
   }
 
-  // Self-PiP visibility. Auto-hide when there is no outgoing video to show
-  // (cam off AND not screensharing) OR when the user has opted to hide it
-  // via the settings menu. The lobby preview is a separate element, so the
-  // placeholder there is always visible.
-  // NB: gating on screenSharing (not camOff alone) is what keeps the
-  // screenshare preview visible when the camera is logically off.
-  const hideSelfAuto = s.camOff && !s.screenSharing;
-  const shouldHideLocal = s.phase === 'room' && (s.hideSelfView || hideSelfAuto);
-  dom.localVideo.classList.toggle('hidden', shouldHideLocal);
+  // ── Camera PiP visibility (#local) ────────────────────────────────────
+  // Only ever shows the camera, never the screenshare. Hidden when:
+  //   - not in the room
+  //   - camera off (nothing to show)
+  //   - screensharing (screen-pip takes over the slot)
+  //   - user toggled "Hide my camera" in settings
+  const showLocal =
+    s.phase === 'room' && !s.camOff && !s.screenSharing && !s.hideSelfView;
+  dom.localVideo.classList.toggle('hidden', !showLocal);
+  if (lastLocalHidden && showLocal) {
+    void dom.localVideo.play().catch(() => {});
+  }
+  lastLocalHidden = !showLocal;
+
+  // ── Screen PiP (#screen-pip) — fully independent path ────────────────
+  // Bound to a dedicated MediaStream wrapping only the screen track, so
+  // nothing in the camera-side logic (track-id tracking, srcObject swaps,
+  // hide class on #local) can interfere with screenshare display.
+  renderScreenPip(s);
 
   // Settings checkbox state
   dom.settingsHideSelf.classList.toggle('on', s.hideSelfView);
@@ -345,6 +365,31 @@ function roomOverlayText(peer: PeerPresence, rtcConnected: boolean): string | nu
   if (peer === 'room')         return 'Linking up…';
   if (peer === 'lobby')        return null; // banner covers it
   return 'Waiting...';
+}
+
+// Track the last-bound screen stream's identity so we only call play() once
+// per fresh stream, not on every render tick.
+let lastScreenStreamId: string | null = null;
+
+function renderScreenPip(s: ClientState): void {
+  const show = s.phase === 'room' && !!s.screenStream && !s.hideSelfView;
+  const el = dom.screenPip;
+
+  if (show && s.screenStream) {
+    if (s.screenStream.id !== lastScreenStreamId) {
+      el.srcObject = s.screenStream;
+      lastScreenStreamId = s.screenStream.id;
+      // Mobile / autoplay-after-rebind hedge: kick playback explicitly.
+      void el.play().catch(() => {});
+    }
+    el.classList.remove('hidden');
+  } else {
+    el.classList.add('hidden');
+    if (lastScreenStreamId) {
+      el.srcObject = null;
+      lastScreenStreamId = null;
+    }
+  }
 }
 
 function syncCameraPicker(s: ClientState): void {

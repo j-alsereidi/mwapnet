@@ -36,6 +36,10 @@ export class MediaManager {
     return this.screenTrack !== null;
   }
 
+  getScreenTrack(): MediaStreamTrack | null {
+    return this.screenTrack;
+  }
+
   currentCamera(): string | null {
     return this.currentCameraId;
   }

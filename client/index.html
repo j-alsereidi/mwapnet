@@ -170,6 +170,30 @@
     /* Don't mirror the local view while screensharing — the user wants to read text */
     #local.screen { transform: none; }
 
+    /* ── Screenshare PiP ────────────────────────────────────────────────
+       A SEPARATE video element from #local. Same on-screen position and
+       sizing, but its srcObject is bound directly to a fresh stream
+       wrapping the screen track — so its visibility/playback is entirely
+       independent of the camera PiP's logic. */
+    #screen-pip {
+      position: absolute; bottom: 88px; right: 16px;
+      width: 144px;
+      aspect-ratio: 16 / 9;
+      border-radius: 10px;
+      object-fit: contain;
+      background: #000;
+      cursor: grab; z-index: 10;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    @media (min-width: 768px) {
+      #screen-pip { width: 240px; bottom: 96px; }
+    }
+    #screen-pip:active { cursor: grabbing; }
+    #screen-pip.hidden { display: none; }
+
     .room-overlay {
       position: absolute;
       top: 50%; left: 50%;
@@ -437,6 +461,7 @@
   <div id="screen-room" class="screen">
     <video id="remote" autoplay playsinline></video>
     <video id="local" autoplay playsinline muted></video>
+    <video id="screen-pip" class="hidden" autoplay playsinline muted></video>
 
     <div id="lobby-banner" class="lobby-banner hidden">MWAP is in the lobby</div>
     <div id="room-overlay" class="room-overlay hidden"></div>

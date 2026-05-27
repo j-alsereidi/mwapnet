@@ -7,6 +7,7 @@ const initialState: ClientState = {
 
   localStream: null,
   remoteStream: null,
+  screenStream: null,
 
   micMuted: false,
   camOff: false,
