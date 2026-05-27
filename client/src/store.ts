@@ -18,6 +18,8 @@ const initialState: ClientState = {
   rtcConnected: false,
   connectionType: 'unknown',
 
+  hideSelfView: false,
+
   lastError: null,
 };
 

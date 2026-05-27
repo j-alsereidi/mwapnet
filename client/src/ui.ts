@@ -25,14 +25,15 @@ const HAS_REAL_HOVER =
   !('ontouchstart' in window);
 
 export interface UiHandlers {
-  onMicToggle():   void;
-  onCamToggle():   void;
+  onMicToggle():       void;
+  onCamToggle():       void;
   onCameraPick(deviceId: string): void;
-  onEnterRoom():   void;
-  onLeaveRoom():   void;
-  onScreenShare(): void;
-  onCameraFlip():  void;
-  onRetry():       void;
+  onEnterRoom():       void;
+  onLeaveRoom():       void;
+  onScreenShare():     void;
+  onCameraFlip():      void;
+  onRetry():           void;
+  onToggleHideSelf():  void;
 }
 
 // DOM refs cached on mount (much faster than getElementById on every render)
@@ -58,6 +59,9 @@ interface Dom {
   retryBtn:      HTMLButtonElement;
   unmuteOverlay: HTMLElement;
   controls:      HTMLElement;
+  settingsBtn:      HTMLButtonElement;
+  settingsMenu:     HTMLElement;
+  settingsHideSelf: HTMLButtonElement;
 }
 
 let dom: Dom;
@@ -92,6 +96,9 @@ export function mountUi(handlers: UiHandlers): void {
     retryBtn:      document.getElementById('retry-btn') as HTMLButtonElement,
     unmuteOverlay: document.getElementById('unmute-overlay')!,
     controls:      document.querySelector('#screen-room .controls') as HTMLElement,
+    settingsBtn:      document.getElementById('settings-btn')        as HTMLButtonElement,
+    settingsMenu:     document.getElementById('settings-menu')!,
+    settingsHideSelf: document.getElementById('settings-hide-self')  as HTMLButtonElement,
   };
 
   // Wire handlers
@@ -105,6 +112,24 @@ export function mountUi(handlers: UiHandlers): void {
   dom.roomBtnLeave.onclick  = handlers.onLeaveRoom;
   dom.retryBtn.onclick      = handlers.onRetry;
   dom.cameraPicker.onchange = () => handlers.onCameraPick(dom.cameraPicker.value);
+
+  // Settings menu — gear toggles the dropdown, clicks outside close it.
+  dom.settingsBtn.onclick = (e) => {
+    e.stopPropagation();
+    dom.settingsMenu.classList.toggle('hidden');
+  };
+  dom.settingsHideSelf.onclick = (e) => {
+    e.stopPropagation();
+    handlers.onToggleHideSelf();
+  };
+  // Swallow inside-menu clicks so the document handler below doesn't close it.
+  dom.settingsMenu.addEventListener('click', (e) => e.stopPropagation());
+  document.addEventListener('pointerdown', (e) => {
+    if (dom.settingsMenu.classList.contains('hidden')) return;
+    if (e.target === dom.settingsBtn || dom.settingsBtn.contains(e.target as Node)) return;
+    if (dom.settingsMenu.contains(e.target as Node)) return;
+    dom.settingsMenu.classList.add('hidden');
+  });
 
   // Hide on platforms where getDisplayMedia is absent (iOS Safari, etc.)
   if (!SCREEN_SHARE_SUPPORTED) dom.roomBtnScreen.style.display = 'none';
@@ -124,6 +149,7 @@ export function mountUi(handlers: UiHandlers): void {
   dom.roomBtnFlip.innerHTML   = iconHtml(ICONS.flip);
   dom.roomBtnLeave.innerHTML  = iconHtml(ICONS.door);
   dom.lobbyBtnEnter.innerHTML = `${iconHtml(ICONS.door)}<span>Enter</span>`;
+  dom.settingsBtn.innerHTML   = iconHtml(ICONS.settings);
 
   setupRoomControlAutoFade();
   setupLocalPipDrag();
@@ -263,7 +289,24 @@ function render(s: ClientState): void {
     dom.lobbyBanner.classList.toggle('hidden', s.peerPresence !== 'lobby');
     setRoomOverlay(s);
     dom.localVideo.classList.toggle('screen', s.screenSharing);
+  } else {
+    // Settings menu only makes sense in the room — auto-close on leave.
+    dom.settingsMenu.classList.add('hidden');
   }
+
+  // Self-PiP visibility. Auto-hide when there is no outgoing video to show
+  // (cam off AND not screensharing) OR when the user has opted to hide it
+  // via the settings menu. The lobby preview is a separate element, so the
+  // placeholder there is always visible.
+  // NB: gating on screenSharing (not camOff alone) is what keeps the
+  // screenshare preview visible when the camera is logically off.
+  const hideSelfAuto = s.camOff && !s.screenSharing;
+  const shouldHideLocal = s.phase === 'room' && (s.hideSelfView || hideSelfAuto);
+  dom.localVideo.classList.toggle('hidden', shouldHideLocal);
+
+  // Settings checkbox state
+  dom.settingsHideSelf.classList.toggle('on', s.hideSelfView);
+  dom.settingsHideSelf.setAttribute('aria-checked', s.hideSelfView ? 'true' : 'false');
 
   // Footer (connection type)
   if (s.phase === 'room' && s.rtcConnected) {

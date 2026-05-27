@@ -291,6 +291,80 @@
     }
     .primary-btn:hover { opacity: 0.85; }
 
+    /* ── Settings (gear) button + dropdown ─────────────────────────────── */
+    .settings-btn {
+      position: absolute;
+      top: 12px; right: 12px;
+      width: 44px; height: 44px;
+      border-radius: 999px;
+      border: none;
+      background: rgba(0,0,0,0.5);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 21;
+      transition: opacity 0.15s, transform 0.1s;
+      padding: 0;
+    }
+    .settings-btn .icon {
+      width: 26px; height: 26px;
+      display: block; pointer-events: none;
+      user-select: none; -webkit-user-drag: none;
+    }
+    html.has-hover .settings-btn:hover { opacity: 0.85; transform: scale(1.05); }
+
+    .settings-menu {
+      position: absolute;
+      top: 64px; right: 12px;
+      min-width: 220px;
+      padding: 6px;
+      background: rgba(15,15,15,0.92);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      z-index: 22;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+    }
+    .settings-menu.hidden { display: none; }
+    .settings-item {
+      width: 100%;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: transparent;
+      border: none;
+      color: #fff;
+      font-size: 14px;
+      font-family: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+    html.has-hover .settings-item:hover { background: rgba(255,255,255,0.06); }
+    .settings-item .check {
+      width: 18px; height: 18px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.35);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .settings-item.on .check {
+      background: #fff;
+      border-color: #fff;
+    }
+    .settings-item.on .check::after {
+      content: '';
+      width: 10px; height: 10px;
+      background: #0a0a0a;
+      border-radius: 2px;
+    }
+
+    /* Self-PiP visibility — JS toggles .hidden in the room when there's no
+       outgoing video (cam off + not screensharing) or the user opted to hide it. */
+    #local.hidden { display: none; }
+
     /* ── Footer (connection-type indicator) ────────────────────────────── */
     #footer {
       position: absolute;
@@ -366,6 +440,14 @@
 
     <div id="lobby-banner" class="lobby-banner hidden">MWAP is in the lobby</div>
     <div id="room-overlay" class="room-overlay hidden"></div>
+
+    <button class="settings-btn" id="settings-btn" title="Settings" aria-label="Settings"></button>
+    <div id="settings-menu" class="settings-menu hidden" role="menu">
+      <button class="settings-item" id="settings-hide-self" role="menuitemcheckbox" aria-checked="false">
+        <span>Hide my camera</span>
+        <span class="check" aria-hidden="true"></span>
+      </button>
+    </div>
 
     <div class="controls">
       <button class="ctrl-btn" id="room-btn-mic"    title="Toggle mic"></button>

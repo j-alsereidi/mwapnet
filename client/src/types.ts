@@ -36,6 +36,10 @@ export interface ClientState {
   rtcConnected: boolean;
   connectionType: ConnectionType;
 
+  // User-controlled: hide the self PiP in the room (via settings menu).
+  // Doesn't affect the lobby preview.
+  hideSelfView: boolean;
+
   lastError: string | null;
 }
 

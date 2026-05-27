@@ -5,7 +5,18 @@ import { connectSignal, type SignalClient } from './signalClient.js';
 import { startRtcSession, type RtcSession } from './rtcSession.js';
 import { fetchIceConfig } from './iceConfigClient.js';
 import { mountUi } from './ui.js';
+import { cameraSound } from './sound.js';
 import type { IceServerConfig, PeerId } from './types.js';
+
+// App-level events that piggyback on the existing `signal` relay. The server
+// forwards `signal.data` opaquely, so we layer non-RTC payloads (currently
+// "I just turned my camera on") on the same channel. We filter these out
+// before the rtcSession sees them so they don't trip the "unknown shape"
+// warning in ingestSignal.
+type AppEvent = { kind: 'app'; event: 'cam-on' };
+function isAppEvent(data: unknown): data is AppEvent {
+  return !!data && typeof data === 'object' && (data as { kind?: unknown }).kind === 'app';
+}
 
 // ── Module-scope singletons ──────────────────────────────────────────────────
 const media = new MediaManager();
@@ -21,11 +32,12 @@ mountUi({
   onMicToggle:   handleMicToggle,
   onCamToggle:   handleCamToggle,
   onCameraPick:  handleCameraPick,
-  onEnterRoom:   () => setMyState('room'),
+  onEnterRoom:   handleEnterRoom,
   onLeaveRoom:   () => setMyState('lobby'),
   onScreenShare: handleScreenShare,
   onCameraFlip:  () => { void handleCameraFlip(); },
   onRetry:       () => { void bootstrap(); },
+  onToggleHideSelf: handleToggleHideSelf,
 });
 
 void bootstrap();
@@ -89,8 +101,13 @@ function handleServerMessage(msg: import('./types.js').ServerMessage): void {
       break;
 
     case 'signal':
-      if (rtcSession) rtcSession.ingestSignal(msg.data);
-      else queuedSignals.push(msg.data);
+      if (isAppEvent(msg.data)) {
+        handleRemoteAppEvent(msg.data);
+      } else if (rtcSession) {
+        rtcSession.ingestSignal(msg.data);
+      } else {
+        queuedSignals.push(msg.data);
+      }
       break;
 
     case 'error':
@@ -152,9 +169,45 @@ function handleMicToggle(): void {
 }
 
 function handleCamToggle(): void {
-  const next = !store.get().camOff;
-  media.setCamOff(next);
-  store.set({ camOff: next });
+  const wasOff = store.get().camOff;
+  const nextOff = !wasOff;
+  media.setCamOff(nextOff);
+  store.set({ camOff: nextOff });
+  // Pre-warm the audio decode on the first user gesture, even when toggling
+  // OFF — it's free if already loaded.
+  cameraSound.prepare();
+  // Camera transitioned off→on while in room → chime for both peers.
+  if (wasOff && !nextOff && store.get().phase === 'room') {
+    fireCamOn();
+  }
+}
+
+function handleEnterRoom(): void {
+  // Pre-warm audio under the user gesture so iOS unlocks the AudioContext.
+  cameraSound.prepare();
+  const camOn = !store.get().camOff;
+  setMyState('room');
+  // Entering the room with camera on counts as a cam-on event.
+  if (camOn) fireCamOn();
+}
+
+function handleToggleHideSelf(): void {
+  store.set({ hideSelfView: !store.get().hideSelfView });
+}
+
+function fireCamOn(): void {
+  void cameraSound.play();
+  // Tell the peer to chime too. We always send — the peer gates on their
+  // own phase, so a lobby-side peer won't hear a stale chime.
+  signalClient?.send({ type: 'signal', data: { kind: 'app', event: 'cam-on' } });
+}
+
+function handleRemoteAppEvent(ev: AppEvent): void {
+  if (ev.event === 'cam-on') {
+    // Only play if we're actually in the room — otherwise the chime is
+    // disconnected from anything the user is seeing.
+    if (store.get().phase === 'room') void cameraSound.play();
+  }
 }
 
 async function handleCameraPick(deviceId: string): Promise<void> {
