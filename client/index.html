@@ -47,10 +47,20 @@
       padding: 24px;
       gap: 20px;
       background: #0a0a0a;
+      overflow: hidden;
+    }
+    /* Background image at 15% opacity, fitted (contain) not cropped (cover) */
+    #screen-lobby::before {
+      content: '';
+      position: absolute; inset: 0;
+      #background: url('/backgrounds/lobbybackground.png') center / contain no-repeat;
+      opacity: 0.15;
+      pointer-events: none;
     }
     .lobby-card {
       width: 100%; max-width: 480px;
       display: flex; flex-direction: column; gap: 16px;
+      position: relative; /* stay above the ::before background layer */
     }
     #lobby-preview {
       width: 100%; aspect-ratio: 16 / 9;
@@ -66,19 +76,27 @@
       padding: 11px 14px;
       border-radius: 10px;
       border: 1px solid rgba(255,255,255,0.15);
-      background: rgba(255,255,255,0.05);
+      /* Solid dark bg so the white text is readable in every browser.
+         color-scheme: dark tells the browser to render the native dropdown
+         popup in dark mode so option text doesn't appear white-on-white. */
+      background: #1a1a1a;
       color: #fff; font-size: 14px;
       outline: none;
+      color-scheme: dark;
     }
     #camera-picker:focus { border-color: rgba(255,255,255,0.4); }
+    #camera-picker option { background: #1a1a1a; color: #fff; }
     .lobby-status {
       text-align: center;
       font-size: 14px;
       color: rgba(255,255,255,0.55);
       letter-spacing: 0.2px;
     }
-    .lobby-status.peer-room   { color: #6fdc8c; }
-    .lobby-status.peer-lobby  { color: #ffd166; }
+    /* Presence colours from the design system:
+       room  = warm parchment (echoes the door icon)
+       lobby = soft mauve (echoes the microphone icon) */
+    .lobby-status.peer-room   { color: #d9c5a8; }
+    .lobby-status.peer-lobby  { color: #b8a8c2; }
 
     /* ── Room ───────────────────────────────────────────────────────────── */
     #screen-room { background: #0a0a0a; }
@@ -130,13 +148,15 @@
       position: absolute;
       top: 12px; left: 50%; transform: translateX(-50%);
       padding: 6px 14px;
-      background: rgba(255,209,102,0.18);
-      color: #ffd166;
+      background: rgba(184,168,194,0.16);
+      color: #b8a8c2;
       border-radius: 999px;
       font-size: 12px;
       letter-spacing: 0.3px;
       backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
       z-index: 8;
+      white-space: nowrap;
     }
     .lobby-banner.hidden { display: none; }
 
@@ -190,19 +210,21 @@
       -webkit-user-drag: none;
     }
 
-    /* ── "Enter room" pill (icon + text, not a bare icon button) ────── */
+    /* ── "Enter" ghost pill (icon + text, not a bare icon button) ────── */
     .ctrl-btn.primary {
       width: auto;
       padding: 0 18px;
-      border-radius: 24px;
+      height: 48px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.18);
       font-size: 15px;
-      font-weight: 600;
-      background: #fff; color: #000;
+      font-weight: 500;
+      background: rgba(255,255,255,0.05); color: #fff;
       gap: 8px;
       opacity: 1;       /* never dim this one */
       transition: background 0.15s, transform 0.1s;
     }
-    html.has-hover .ctrl-btn.primary:hover { background: #f0f0f0; transform: scale(1.03); }
+    html.has-hover .ctrl-btn.primary:hover { background: rgba(255,255,255,0.10); transform: scale(1.03); }
     .ctrl-btn.primary .icon { width: 22px; height: 22px; }  /* ← enter-room icon size */
 
     /* ── Auth gate ──────────────────────────────────────────────────────── */
