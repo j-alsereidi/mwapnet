@@ -51,7 +51,7 @@ services:
       --realm=${TURN_REALM:-duo.local}
       --listening-port=3478
       --tls-listening-port=5349
-      --external-ip=${PUBLIC_TURN_HOST}
+      --external-ip=${PUBLIC_TURN_HOST}/${PRIVATE_TURN_HOST}
       --min-port=49160
       --max-port=49200
       --total-quota=4
@@ -63,6 +63,15 @@ services:
     # NOTE: --no-loopback-peers was removed — modern coturn rejects it and
     # crash-loops (loopback peers are denied by default now; the opt-in flag
     # is --allow-loopback-peers). Confirmed via local validation.
+    #
+    # NOTE: --external-ip needs public/private pairing (not just the bare
+    # public IP) when coturn can see multiple local interfaces, which it does
+    # under network_mode: host (VM's real NIC + Docker's bridge interfaces).
+    # A bare IP gets rejected as a malformed argument and coturn silently
+    # falls back to auto-discovered (private/unreachable) relay addresses.
+    # ponytail: PRIVATE_TURN_HOST is a static env var, not auto-detected —
+    # fine since Oracle VNIC private IPs don't change on their own. If the
+    # VNIC is ever recreated, update PRIVATE_TURN_HOST in .env to match.
 
 volumes:
   caddy_data:
