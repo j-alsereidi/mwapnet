@@ -49,15 +49,21 @@ in the console, since it's a network-level setting outside the VM itself:
 you pasted it at instance creation. If you skipped that, run manually:
 
 ```bash
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 3478 -j ACCEPT
-sudo iptables -I INPUT 6 -m state --state NEW -p udp --dport 3478 -j ACCEPT
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 5349 -j ACCEPT
-sudo iptables -I INPUT 6 -m state --state NEW -p udp --dport 49160:49200 -j ACCEPT
+sudo iptables -I INPUT 1 -m state --state NEW -p tcp --dport 80 -j ACCEPT
+sudo iptables -I INPUT 1 -m state --state NEW -p tcp --dport 443 -j ACCEPT
+sudo iptables -I INPUT 1 -m state --state NEW -p tcp --dport 3478 -j ACCEPT
+sudo iptables -I INPUT 1 -m state --state NEW -p udp --dport 3478 -j ACCEPT
+sudo iptables -I INPUT 1 -m state --state NEW -p tcp --dport 5349 -j ACCEPT
+sudo iptables -I INPUT 1 -m state --state NEW -p udp --dport 49160:49200 -j ACCEPT
 sudo netfilter-persistent save
 ```
-(If `netfilter-persistent` isn't installed: `sudo apt install iptables-persistent`.)
+
+Insert at position **1**, not lower. Oracle's Ubuntu image ships an INPUT
+chain that ends in a blanket `REJECT all` rule partway down; any ACCEPT
+inserted below it never matches. Verify with
+`sudo iptables -L INPUT -n --line-numbers` — every port ACCEPT above must
+appear above the `REJECT ... icmp-host-prohibited` line. (If
+`netfilter-persistent` isn't installed: `sudo apt install iptables-persistent`.)
 
 ## 3. Install Docker
 
@@ -73,8 +79,8 @@ sudo usermod -aG docker $USER
 ## 4. Clone the repo and configure `.env`
 
 ```bash
-git clone <your-repo-url> pi-test
-cd pi-test
+git clone https://github.com/j-alsereidi/mwapnet.git
+cd mwapnet
 cp .env.example .env
 ```
 
@@ -84,11 +90,21 @@ Edit `.env` and fill in:
 PAIR_SECRET_A=<generate — see below>
 PAIR_SECRET_B=<generate — see below>
 TURN_STATIC_AUTH_SECRET=<generate — see below>
-PUBLIC_TURN_HOST=<this VM's public IP>       # e.g. 132.145.67.89
+PUBLIC_TURN_HOST=<this VM's public IP>        # e.g. 132.145.67.89
+PRIVATE_TURN_HOST=<this VM's private IP>      # e.g. 10.0.0.108 — see note below
 PUBLIC_TURN_PORT=3478
 TURNS_TLS_PORT=5349
 APP_DOMAIN=<this VM's public IP>.nip.io       # e.g. 132.145.67.89.nip.io
 ```
+
+`PRIVATE_TURN_HOST` is the VM's internal IP — find it with `hostname -I` on
+the VM (take the `10.x` / `172.x` / `192.168.x` address) or read it off the
+VNIC in the Oracle console. coturn runs with `network_mode: host` and sees
+several local interfaces, so its `--external-ip` flag needs the
+`public/private` pair to know which address to advertise. Supplying only the
+public IP makes coturn reject the argument and silently fall back to
+advertising an unreachable private address — the classic "works on the same
+network, fails across the internet" symptom.
 
 Generate each secret with:
 ```bash
@@ -114,10 +130,14 @@ First boot: Caddy fetches its Let's Encrypt cert on the first HTTPS request
 ## 6. Verify
 
 - **App loads**: `https://<APP_DOMAIN>/#k=<PAIR_SECRET_A>` → lobby screen appears.
-- **coturn is healthy**: `docker compose logs coturn --tail 30` — should show
-  `INFO: Relay address to use: <PUBLIC_TURN_HOST>` (not a private/container IP —
-  if it shows something else, `--external-ip` isn't reading `PUBLIC_TURN_HOST`
-  correctly, double check `.env`).
+- **coturn parsed `--external-ip` correctly**: `docker compose config | grep external`
+  should print `--external-ip=<public>/<private>`, and
+  `docker compose logs coturn | grep -i "external-ip\|Unknown argument"` should
+  show `Whitelisting external-ip private part: <private>` and **no** "Unknown
+  argument" error. (Note: coturn's normal startup log lists private relay
+  addresses regardless — that is expected and not a fault; `--external-ip`
+  only changes the address it advertises during an allocation, which the
+  relay test below confirms.)
 - **ICE config is correct**:
   ```bash
   curl https://<APP_DOMAIN>/ice-config -H "Authorization: Bearer <PAIR_SECRET_A>"
@@ -142,16 +162,19 @@ docker compose up -d --build
 
 ## Local validation (already done — informational)
 
-Before ever deploying, this exact coturn configuration was validated on a
-local Docker Desktop stack (`docker-compose.local.yml`) using a real browser
-`RTCPeerConnection` forced to `iceTransportPolicy: 'relay'`. That test caught
-two bugs that are already fixed in this repo's `docker-compose.yml`:
+Before ever deploying, this coturn configuration was validated on a local
+Docker Desktop stack (`docker-compose.local.yml`) using a real browser
+`RTCPeerConnection` forced to `iceTransportPolicy: 'relay'`. Three coturn
+gotchas surfaced during bring-up and are already handled in this repo:
 
 - `--no-loopback-peers` is not a valid flag on modern coturn — it crash-loops
   the container. Removed (loopback denial is the default now).
-- `--external-ip` was missing entirely — without it, coturn advertises its
-  private/container IP as the relay address, which no external peer can reach.
-  Now set to `${PUBLIC_TURN_HOST}`.
+- `--external-ip` needs the `public/private` pair (`${PUBLIC_TURN_HOST}/${PRIVATE_TURN_HOST}`),
+  not a bare public IP, because `network_mode: host` exposes several local
+  interfaces. A bare IP is rejected and coturn falls back to advertising an
+  unreachable address.
+- On the VM, the port ACCEPT rules must sit above Oracle's default `REJECT`
+  in the iptables INPUT chain (see step 2B).
 
-To re-run that local test at any point (e.g. after further coturn changes),
-see `docker-compose.local.yml`'s header comment for instructions.
+To re-run the local relay test at any point (e.g. after further coturn
+changes), see `docker-compose.local.yml`'s header comment for instructions.

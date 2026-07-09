@@ -11,13 +11,16 @@ packages:
   - git
 
 runcmd:
-  # OS firewall: open the ports the app + coturn need
-  - iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
-  - iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
-  - iptables -I INPUT 6 -m state --state NEW -p tcp --dport 3478 -j ACCEPT
-  - iptables -I INPUT 6 -m state --state NEW -p udp --dport 3478 -j ACCEPT
-  - iptables -I INPUT 6 -m state --state NEW -p tcp --dport 5349 -j ACCEPT
-  - iptables -I INPUT 6 -m state --state NEW -p udp --dport 49160:49200 -j ACCEPT
+  # OS firewall: open the ports the app + coturn need. Insert at position 1 so
+  # these land ABOVE Oracle's default "REJECT all" rule (which sits partway
+  # down the INPUT chain). Inserting lower — e.g. -I INPUT 6 — puts them after
+  # the REJECT, where they never match and coturn stays unreachable.
+  - iptables -I INPUT 1 -m state --state NEW -p tcp --dport 80 -j ACCEPT
+  - iptables -I INPUT 1 -m state --state NEW -p tcp --dport 443 -j ACCEPT
+  - iptables -I INPUT 1 -m state --state NEW -p tcp --dport 3478 -j ACCEPT
+  - iptables -I INPUT 1 -m state --state NEW -p udp --dport 3478 -j ACCEPT
+  - iptables -I INPUT 1 -m state --state NEW -p tcp --dport 5349 -j ACCEPT
+  - iptables -I INPUT 1 -m state --state NEW -p udp --dport 49160:49200 -j ACCEPT
   - netfilter-persistent save
   # Docker install
   - curl -fsSL https://get.docker.com | sh

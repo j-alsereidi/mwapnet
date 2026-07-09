@@ -1,68 +1,97 @@
-# duo
+# MWAPNET
 
-A permanent video room for exactly two people. No accounts, no meetings, no waiting rooms — just one always-available call with a lobby in front of it.
+A private, always-on video room for exactly two people. There are no accounts, no scheduled meetings, and no waiting rooms. Each person opens a personal link and lands in a lobby; when both people enter the room, a peer-to-peer WebRTC call starts automatically.
 
-## How it works
+The project is built on the native browser WebRTC API with no client-side media library. The signaling server is a small Node process, and cross-network calls are relayed through a self-hosted coturn TURN server so that connections succeed even when both peers sit behind restrictive NAT such as mobile carrier networks.
 
-- **Peer A** and **Peer B** each hold a distinct pair secret. There are no other users — the secret *is* the identity.
-- On connect, you land in the **lobby**: pick a camera, toggle mic/cam, see whether the other one is around. Three statuses: nobody here, in the lobby, in the meeting.
-- Click **enter room** to join. When *both* peers are in the room, WebRTC starts. If the other one is still in the lobby, the room shows a small banner saying so.
-- **Screenshare** (desktop or mobile) swaps your camera track via `replaceTrack` — no renegotiation, instant switch.
-- **Leaving** drops you back to the lobby, where you can re-enter. The RTC connection is recreated cleanly each time.
-- The footer shows `direct` or `relayed via TURN` once connected.
+## Features
 
-## Quick start (Windows, ngrok)
+- Two-person model with no user database. Each peer holds one secret, and that secret is the identity.
+- A lobby that shows the other person's presence before you enter: nobody present, waiting in the lobby, or already in the room.
+- Automatic call setup. The RTCPeerConnection is created only while both peers are in the room and is torn down cleanly the moment either one leaves.
+- Camera switching and screen sharing that swap the outgoing video track in place via `replaceTrack`, so neither requires renegotiation.
+- Mobile support, including front/rear camera switching and screen sharing where the browser allows it.
+- ICE restart and candidate queueing for resilience when a network path drops mid-call.
+- A connection-type indicator that reports whether the call is direct or relayed through TURN.
+- Three interchangeable TURN back ends selected by environment variable: self-hosted coturn, Cloudflare Realtime TURN, or a raw ICE-servers override for any third-party provider.
+
+## Architecture
+
+```
+            +---------+  state + signaling   +---------+
+   Peer A --+   WSS   +----------------------+   WSS   +-- Peer B
+            +----+----+                      +----+----+
+                 |      +------------------+      |
+                 +------+ signaling server +------+
+                        | (Node + ws)      |
+                        +------------------+
+                 ^                                ^
+                 +-------- DTLS/SRTP P2P ---------+
+                          (TURN relay when NAT blocks a direct path)
+```
+
+Presence runs on two independent axes, one per peer, each moving between `lobby` and `room`. The signaling server mirrors each peer's state to the other. The client concentrates all connection lifecycle logic in a single `reconcileRtc()` function, which is the only place an `RTCPeerConnection` is created or destroyed. The connection exists if and only if both peers report `room`.
+
+### Repository layout
+
+| Path | Responsibility |
+| --- | --- |
+| `server/src/` | Express plus `ws`. Authenticates peers, tracks presence, relays signaling messages, and issues TURN credentials. |
+| `client/src/main.ts` | Orchestrator. Owns `reconcileRtc()` and routes every state transition through it. |
+| `client/src/media.ts` | Owns the local `MediaStream`. Camera switch and screen share both swap the video track in place. |
+| `client/src/rtcSession.ts` | Native WebRTC session. Handles offer/answer, ICE restart, and candidate queueing. |
+| `client/src/ui.ts` | Renders lobby and room state from a small central store. |
+| `docker-compose.yml` | Production stack: Caddy (HTTPS), the Node server, and coturn. |
+| `docker-compose.local.yml` | Local coturn validation stack used to test the relay before deploying. |
+| `DEPLOY.md` | Step-by-step production deployment to a free cloud VM. |
+
+## Running it locally (Windows)
+
+The fastest way to try the app on your own machine and phone is the included launcher, which serves the app over an [ngrok](https://ngrok.com/download) tunnel. It requires [Node.js](https://nodejs.org) and ngrok on your `PATH`.
 
 ```
 dev.bat
 ```
 
-That's it. The script generates pair secrets on first run, installs deps, builds the client, then opens two terminals: one for the server, one for ngrok. When the tunnel is up it prints the two share links — one for this PC, one for the mobile.
+On first run the script generates the pair secrets, installs dependencies, and builds the client. It then starts the server and the tunnel and prints two links, one for each device. Open the first on your computer and the second on your phone.
 
-Cross-network calls need a TURN relay (carrier NAT can't be punched through with STUN alone). Sign up free at [metered.ca](https://dashboard.metered.ca/signup), grab your TURN credentials, and add them to `.env`:
+A call between two devices on the same local network will connect without a TURN server. A call across different networks, such as your phone on mobile data, needs a reachable TURN relay; see the deployment section below for a permanent setup, or set `ICE_SERVERS_JSON` in `.env` to point at any third-party TURN provider for a quick test.
 
-```
-ICE_SERVERS_JSON=[{"urls":"stun:stun.relay.metered.ca:80"},{"urls":"turn:standard.relay.metered.ca:80","username":"...","credential":"..."},{"urls":"turn:standard.relay.metered.ca:443?transport=tcp","username":"...","credential":"..."}]
-```
+## Running it with Docker
 
-Add the same line to `.env.bat` prefixed with `@set `, then restart.
+The production stack runs entirely in containers. On any machine with Docker installed:
 
-## Architecture
-
-```
-            ┌─────────┐  state + signaling  ┌─────────┐
-   Peer A ──┤   WSS   ├─────────────────────┤   WSS   ├── Peer B
-            └────┬────┘                     └────┬────┘
-                 │     ┌───────────────────┐     │
-                 └─────┤  signaling server ├─────┘
-                       │  (Node + ws)      │
-                       └───────────────────┘
-                  ▲                              ▲
-                  └──── DTLS/SRTP P2P ───────────┘
-                          (TURN relay if NAT blocks)
+```bash
+cp .env.example .env      # then fill in the values described inside
+docker compose up -d --build
 ```
 
-**Two state axes, independent:**
+The stack comprises three services: Caddy terminates HTTPS and reverse-proxies the app, the Node server handles signaling and serves the built client, and coturn provides the TURN relay. Configuration is entirely through `.env`; see `.env.example` for every variable and its purpose.
 
-| | A connected | A in lobby | A in room |
-|---|---|---|---|
-| **B connected**     | both idle | A sees "other in lobby"; B sees blank | A sees "other in meeting"; B alone in room |
-| **B in lobby**      | (mirror)  | both see each other in lobby | A sees lobby banner; B sees "other in meeting" |
-| **B in room**       | (mirror)  | (mirror) | **WebRTC live** |
+For a permanent, no-cost deployment to an Oracle Cloud Always Free VM, including firewall configuration and a first-boot provisioning script, follow [`DEPLOY.md`](./DEPLOY.md).
 
-RTC starts when both are in `room`, tears down the moment either leaves.
+## Configuration
 
-**Code map:**
+All configuration is read from environment variables. The `.env.example` file documents each one. The essentials:
 
-- `server/src/` — Express + `ws`. Tracks each slot's presence (`lobby` / `room`), relays signals, mints ephemeral TURN credentials.
-- `client/src/main.ts` — orchestrator. The `reconcileRtc()` function is the only place an `RTCPeerConnection` is created or torn down — every state transition routes through it.
-- `client/src/media.ts` — owns the local stream. Camera switch and screenshare both work by swapping the video track in-place; rtcSession reacts via `replaceTrack`.
-- `client/src/rtcSession.ts` — native WebRTC (no library). Handles ICE restart, queues ICE candidates that arrive before the remote description.
+| Variable | Purpose |
+| --- | --- |
+| `PAIR_SECRET_A`, `PAIR_SECRET_B` | The two peer secrets. Must differ and be at least 32 characters each. |
+| `APP_DOMAIN` | Hostname Caddy provisions a TLS certificate for. A `<public-ip>.nip.io` value works with no DNS setup. |
+| `TURN_STATIC_AUTH_SECRET` | Shared secret between the signaling server and coturn for time-limited TURN credentials. |
+| `PUBLIC_TURN_HOST`, `PRIVATE_TURN_HOST` | The VM's public and private IP addresses. coturn needs both to advertise a reachable relay address under host networking. |
 
-## Security notes
+TURN back end is chosen by which variables are set, in priority order: `ICE_SERVERS_JSON` (a raw override) first, then Cloudflare Realtime TURN (`CLOUDFLARE_TURN_KEY_ID` and `CLOUDFLARE_TURN_KEY_SECRET`), then self-hosted coturn (`PUBLIC_TURN_HOST`). If none are set, the server falls back to public STUN only, which is sufficient for same-network testing.
 
-- Pair secrets travel via URL fragment (`#k=...`) so they never hit server access logs.
-- Browser scrubs the fragment from the address bar immediately on read.
-- Server compares both pair secrets in constant time on every auth.
-- A second connection for the same slot bumps the first (handles laptop-sleep reconnects).
-- Rate-limited: 5 auth attempts/min per IP, 10 ICE-config requests/min per IP, 100 WS messages/sec per socket.
+## Security
+
+- Pair secrets travel in the URL fragment (`#k=...`), which browsers never send to the server, so the secret stays out of access logs. The client clears the fragment from the address bar as soon as it reads it.
+- The server compares pair secrets with a constant-time algorithm on every authentication.
+- A second connection for the same peer slot replaces the first, which handles reconnection after a laptop sleeps or a network changes.
+- Requests are rate limited: five authentication attempts per minute per IP with a five-minute block on excess, ten ICE-config requests per minute per IP, and one hundred WebSocket messages per second per socket.
+
+Note that anyone holding a pair secret can join as that peer, so treat the links as you would a password. Rotating the secrets is a matter of changing the two environment variables and restarting.
+
+## License
+
+MIT. See [`LICENSE`](./LICENSE).
