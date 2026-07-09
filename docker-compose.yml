@@ -5,6 +5,12 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp"
+    environment:
+      # Caddy needs APP_DOMAIN present *inside* the container so the
+      # {$APP_DOMAIN} placeholder in the Caddyfile resolves to the real
+      # hostname. Without it, {$APP_DOMAIN} expands to empty and Caddy
+      # misreads the config as a global-options block.
+      APP_DOMAIN: "${APP_DOMAIN}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
