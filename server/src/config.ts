@@ -22,8 +22,6 @@ function optionalEnvInt(name: string, defaultVal: number): number {
 
 const pairSecretA = requireEnv('PAIR_SECRET_A');
 const pairSecretB = requireEnv('PAIR_SECRET_B');
-const turnStaticAuthSecret = requireEnv('TURN_STATIC_AUTH_SECRET');
-const publicTurnHost = requireEnv('PUBLIC_TURN_HOST');
 
 if (pairSecretA.length < 32) {
   console.error('[config] PAIR_SECRET_A must be >= 32 characters');
@@ -37,8 +35,24 @@ if (pairSecretA === pairSecretB) {
   console.error('[config] PAIR_SECRET_A and PAIR_SECRET_B must differ');
   process.exit(1);
 }
-if (turnStaticAuthSecret.length < 32) {
-  console.error('[config] TURN_STATIC_AUTH_SECRET must be >= 32 characters');
+
+// Cloudflare Realtime TURN — when set, the server fetches ephemeral TURN
+// credentials from the Cloudflare API on each /ice-config request.
+// Get a key pair from: Cloudflare Dashboard → Realtime → TURN → Create TURN keys.
+const cloudflareTurnKeyId     = process.env['CLOUDFLARE_TURN_KEY_ID']     ?? '';
+const cloudflareTurnKeySecret = process.env['CLOUDFLARE_TURN_KEY_SECRET'] ?? '';
+
+// Self-hosted coturn — optional; only used when Cloudflare TURN is not configured.
+// TURN_STATIC_AUTH_SECRET must still be >= 32 chars if provided (coturn requires it).
+const publicTurnHost       = process.env['PUBLIC_TURN_HOST']        ?? '';
+const turnStaticAuthSecret = process.env['TURN_STATIC_AUTH_SECRET'] ?? '';
+
+const usingCloudflareTurn = cloudflareTurnKeyId.length > 0 && cloudflareTurnKeySecret.length > 0;
+const usingCoturn = !usingCloudflareTurn && publicTurnHost.length > 0 &&
+  publicTurnHost !== 'localhost' && publicTurnHost !== '127.0.0.1';
+
+if (usingCoturn && turnStaticAuthSecret.length < 32) {
+  console.error('[config] TURN_STATIC_AUTH_SECRET must be >= 32 characters when using self-hosted TURN');
   process.exit(1);
 }
 
@@ -62,6 +76,10 @@ export const config = {
   port: optionalEnvInt('PORT', 8080),
   pairSecretA,
   pairSecretB,
+  // Cloudflare Realtime TURN (preferred when set)
+  cloudflareTurnKeyId,
+  cloudflareTurnKeySecret,
+  // Self-hosted coturn (fallback when CF TURN is not configured)
   turnStaticAuthSecret,
   turnRealm: process.env['TURN_REALM'] ?? 'duo.local',
   publicTurnHost,

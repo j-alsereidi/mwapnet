@@ -17,9 +17,28 @@ function buildTurnCredential(): { username: string; credential: string } {
   return { username, credential };
 }
 
-export function buildIceConfig(): IceServerConfig {
-  // Explicit ICE_SERVERS_JSON override wins over everything — for plugging in
-  // a third-party TURN provider (Metered, Cloudflare, Twilio, etc.).
+/** Fetch ephemeral TURN credentials from Cloudflare Realtime TURN API.
+ *  Called on each /ice-config request so credentials are always fresh (≤ 600s TTL).
+ *  API reference: https://developers.cloudflare.com/realtime/turn/generate-credentials/ */
+async function buildCloudflareIceConfig(): Promise<IceServerConfig> {
+  const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${config.cloudflareTurnKeyId}/credentials/generate-ice-servers`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.cloudflareTurnKeySecret}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ ttl: 600 }),
+  });
+  if (!res.ok) {
+    throw new Error(`Cloudflare TURN API returned ${res.status}: ${await res.text()}`);
+  }
+  const data = await res.json() as { iceServers: IceServerConfig['iceServers'] };
+  return { iceServers: data.iceServers, ttlSeconds: 600 };
+}
+
+export async function buildIceConfig(): Promise<IceServerConfig> {
+  // Priority 1: Explicit ICE_SERVERS_JSON override — verbatim, highest precedence.
   if (config.iceServersOverride) {
     return {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -28,9 +47,16 @@ export function buildIceConfig(): IceServerConfig {
     };
   }
 
-  // No real TURN is reachable in the local dev setup — return public STUN only.
-  // This works for same-LAN testing but fails across symmetric NATs (mobile data).
-  if (config.publicTurnHost === 'localhost' || config.publicTurnHost === '127.0.0.1') {
+  // Priority 2: Cloudflare Realtime TURN — when CF keys are configured, fetch
+  // fresh short-lived credentials on every request. TURN traffic goes directly
+  // from peers to Cloudflare's edge; the app server is not in the media path.
+  if (config.cloudflareTurnKeyId && config.cloudflareTurnKeySecret) {
+    return buildCloudflareIceConfig();
+  }
+
+  // Priority 3: No real TURN reachable in local dev — return public STUN only.
+  // Works for same-LAN testing but fails across symmetric NATs (mobile data).
+  if (!config.publicTurnHost || config.publicTurnHost === 'localhost' || config.publicTurnHost === '127.0.0.1') {
     return {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -40,6 +66,7 @@ export function buildIceConfig(): IceServerConfig {
     };
   }
 
+  // Priority 4: Self-hosted coturn — build HMAC credentials for the configured host.
   const { username, credential } = buildTurnCredential();
   const h = config.publicTurnHost;
   const p = config.publicTurnPort;
@@ -101,6 +128,11 @@ export function mountIceConfigRoute(app: Express): void {
       return;
     }
 
-    res.json(buildIceConfig());
+    buildIceConfig()
+      .then((cfg) => res.json(cfg))
+      .catch((err: unknown) => {
+        console.error('[ice-config] build failed:', err);
+        res.status(500).json({ error: 'ICE config unavailable' });
+      });
   });
 }

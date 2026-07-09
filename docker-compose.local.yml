@@ -1,0 +1,68 @@
+# Local validation stack — NOT for production.
+#
+# Purpose: prove the self-hosted coturn config + the server's HMAC credential
+# generation produce a working TURN `relay` candidate, before deploying to a
+# cloud VM. Differs from the production docker-compose.yml in two ways:
+#   1. coturn uses explicit port mappings instead of `network_mode: host`,
+#      because host networking is a Linux-only feature and is unreliable on
+#      Docker Desktop for Windows/Mac.
+#   2. No Caddy / HTTPS — http://localhost:8080 is already a WebRTC secure
+#      context, so getUserMedia works without TLS.
+#
+# IMPORTANT: this file intentionally does NOT forward ICE_SERVERS_JSON to the
+# server container. The .env may contain a Metered override; if it reached the
+# server, buildIceConfig() would return it verbatim and coturn would never be
+# exercised. By omitting it here, the server falls through to the self-hosted
+# coturn code path that we actually want to test.
+#
+# Run with:
+#   docker compose -f docker-compose.local.yml up --build
+#
+# PUBLIC_TURN_HOST in .env must be this machine's LAN IP (e.g. 192.168.1.17),
+# NOT localhost — iceConfig.ts returns STUN-only for localhost/127.0.0.1.
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      PAIR_SECRET_A: "${PAIR_SECRET_A}"
+      PAIR_SECRET_B: "${PAIR_SECRET_B}"
+      TURN_STATIC_AUTH_SECRET: "${TURN_STATIC_AUTH_SECRET}"
+      PUBLIC_TURN_HOST: "${PUBLIC_TURN_HOST}"     # must be LAN IP, not localhost
+      PUBLIC_TURN_PORT: "${PUBLIC_TURN_PORT:-3478}"
+      TURNS_TLS_PORT: "${TURNS_TLS_PORT:-5349}"
+    restart: unless-stopped
+    depends_on:
+      - coturn
+
+  coturn:
+    image: coturn/coturn:latest
+    # Explicit port maps (NOT host networking) so it works on Docker Desktop.
+    ports:
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      - "5349:5349/tcp"
+      - "49160-49200:49160-49200/udp"
+    command: >
+      -n
+      --log-file=stdout
+      --lt-cred-mech
+      --use-auth-secret
+      --static-auth-secret=${TURN_STATIC_AUTH_SECRET}
+      --realm=${TURN_REALM:-duo.local}
+      --listening-port=3478
+      --tls-listening-port=5349
+      --external-ip=${PUBLIC_TURN_HOST}
+      --min-port=49160
+      --max-port=49200
+      --total-quota=4
+      --user-quota=2
+      --no-multicast-peers
+      --no-cli
+      --fingerprint
+    restart: unless-stopped

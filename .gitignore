@@ -5,3 +5,11 @@ dist/
 *.local
 app.md
 .claude/
+
+# SSH keys downloaded from cloud providers (Oracle, etc.) — never commit these
+*.key
+*.key.pub
+*.pem
+
+# Stray output file from local shell experiments
+/icacls
