@@ -136,6 +136,24 @@
     .lobby-status.peer-room   { color: #d9c5a8; }
     .lobby-status.peer-lobby  { color: #b8a8c2; }
 
+    /* One-shot transition effects — fire only on the specific state changes
+       requested (absent→lobby, lobby→room), never on any other transition. */
+    @keyframes lobby-status-sparkle {
+      0%   { text-shadow: 0 0 0 rgba(184,168,194,0); transform: scale(1); }
+      35%  { text-shadow: 0 0 10px rgba(184,168,194,0.9), 0 0 22px rgba(184,168,194,0.5); transform: scale(1.06); }
+      100% { text-shadow: 0 0 0 rgba(184,168,194,0); transform: scale(1); }
+    }
+    .lobby-status.sparkle { animation: lobby-status-sparkle 0.6s ease-out; }
+
+    @keyframes lobby-status-shake {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-4px); }
+      40% { transform: translateX(4px); }
+      60% { transform: translateX(-3px); }
+      80% { transform: translateX(3px); }
+    }
+    .lobby-status.shake { animation: lobby-status-shake 0.4s ease-in-out; }
+
     /* ── Room ───────────────────────────────────────────────────────────── */
     #screen-room { background: #0a0a0a; }
     #remote {

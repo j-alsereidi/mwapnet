@@ -225,6 +225,7 @@ let lastLocalStreamId: string | null = null;
 let lastLocalVideoTrackId: string | null = null;
 let lastRemoteStreamId: string | null = null;
 let lastLocalHidden = false;
+let lastPeerPresence: PeerPresence | null = null;
 
 function render(s: ClientState): void {
   // Active screen
@@ -294,6 +295,13 @@ function render(s: ClientState): void {
   } else {
     dom.lobbyStatus.textContent = "No one's here.";
   }
+  // One-shot effects for exactly these two transitions — nothing else.
+  if (lastPeerPresence === 'disconnected' && s.peerPresence === 'lobby') {
+    triggerLobbyStatusEffect('sparkle');
+  } else if (lastPeerPresence === 'lobby' && s.peerPresence === 'room') {
+    triggerLobbyStatusEffect('shake');
+  }
+  lastPeerPresence = s.peerPresence;
 
   // Room — "other is in lobby" banner & overlay copy
   if (s.phase === 'room') {
@@ -341,6 +349,17 @@ function render(s: ClientState): void {
   if (s.phase === 'failed') {
     dom.failedMsg.textContent = s.lastError ?? 'Something went wrong.';
   }
+}
+
+// Fires a one-shot CSS animation on the lobby status text. Removes any
+// previous effect class and forces a reflow first so the same effect can
+// retrigger if the same transition happens again shortly after.
+function triggerLobbyStatusEffect(effect: 'sparkle' | 'shake'): void {
+  const el = dom.lobbyStatus;
+  el.classList.remove('sparkle', 'shake');
+  void el.offsetWidth; // force reflow
+  el.classList.add(effect);
+  el.addEventListener('animationend', () => el.classList.remove(effect), { once: true });
 }
 
 function setActiveScreen(phase: ClientState['phase']): void {
