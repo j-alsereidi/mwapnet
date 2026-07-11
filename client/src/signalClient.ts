@@ -32,14 +32,22 @@ export function connectSignal(opts: { url: string; pairSecret: string }): Signal
 
     ws.onclose = (event) => {
       if (closed) return;
-      // Server-issued auth/replace closes are terminal — don't reconnect
+      // Auth failure is genuinely terminal — the pair secret is invalid,
+      // retrying won't help.
       if (event.code === 4001) {
         emit({ type: 'error', code: 'unauthorized', message: event.reason });
         return;
       }
       if (event.code === 4000) {
         emit({ type: 'error', code: 'replaced', message: event.reason });
-        return;
+        // Fall through to reconnect rather than staying dead. "Replaced"
+        // fires whenever a newer connection wins the same peer slot — the
+        // intended case is a stale tab after laptop sleep, but it also
+        // fires when THIS device's own network flaps (mobile carrier IP
+        // churn) and races itself. Treating it as terminal left the losing
+        // tab silently disconnected with no retry and no visible error
+        // until a manual page reload. Reconnecting is harmless: if another
+        // session really is active, this one just loses the race again.
       }
       const delay = BACKOFF_MS[Math.min(retryCount, BACKOFF_MS.length - 1)];
       retryCount++;
