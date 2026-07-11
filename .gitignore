@@ -13,3 +13,6 @@ app.md
 
 # Stray output file from local shell experiments
 /icacls
+
+# Personal SSH launcher — hardcodes this machine's VM IP/key, not portable
+/ssh-vm.bat
