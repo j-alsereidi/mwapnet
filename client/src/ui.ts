@@ -419,3 +419,17 @@ function showUnmuteOverlay(): void {
     dom.unmuteOverlay.classList.add('hidden');
   };
 }
+
+// ── Transient toast ──────────────────────────────────────────────────────────
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Show a short status message that fades out on its own. Used for failures
+ *  that would otherwise be invisible (e.g. screen share failing on mobile). */
+export function showToast(message: string, ms = 3500): void {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.remove('hidden');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add('hidden'), ms);
+}

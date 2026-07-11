@@ -413,6 +413,25 @@
       background: rgba(0,0,0,0.6);
       padding: 12px 24px; border-radius: 8px;
     }
+
+    /* ── Toast (transient status message) ──────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 84px; left: 50%; transform: translateX(-50%);
+      max-width: 85vw;
+      padding: 10px 18px;
+      background: rgba(0,0,0,0.75);
+      color: #fff; font-size: 14px;
+      border-radius: 999px;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: 30;
+      pointer-events: none;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      opacity: 1;
+      transition: opacity 0.3s ease;
+    }
+    #toast.hidden { opacity: 0; }
   </style>
 </head>
 <body>
@@ -489,6 +508,9 @@
   <div id="unmute-overlay" class="hidden">
     <span>tap to unmute</span>
   </div>
+
+  <!-- Transient status toast -->
+  <div id="toast" class="hidden"></div>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

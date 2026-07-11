@@ -20,41 +20,44 @@ export function connectSignal(opts: { url: string; pairSecret: string }): Signal
   }
 
   function connect(): void {
-    ws = new WebSocket(opts.url, [`bearer.${opts.pairSecret}`]);
+    const sock = new WebSocket(opts.url, [`bearer.${opts.pairSecret}`]);
+    ws = sock;
 
-    ws.onopen = () => { retryCount = 0; };
+    sock.onopen = () => { retryCount = 0; };
 
-    ws.onmessage = (event) => {
+    sock.onmessage = (event) => {
       try {
         emit(JSON.parse(event.data as string) as ServerMessage);
       } catch { /* malformed — ignore */ }
     };
 
-    ws.onclose = (event) => {
-      if (closed) return;
-      // Auth failure is genuinely terminal — the pair secret is invalid,
-      // retrying won't help.
+    sock.onclose = (event) => {
+      // Ignore close events from superseded sockets: if a reconnect already
+      // created a newer WebSocket, this one's fate is irrelevant — reacting
+      // to it would double-reconnect or surface a stale "replaced" error.
+      if (closed || ws !== sock) return;
+      // Auth failure is terminal — the pair secret is invalid, retrying
+      // won't help.
       if (event.code === 4001) {
         emit({ type: 'error', code: 'unauthorized', message: event.reason });
         return;
       }
+      // "Replaced" (4000) is also terminal, deliberately. It means another
+      // live session holds this peer slot (same link open on a second
+      // device or tab). Auto-reconnecting here starts a bump war: each
+      // side reclaims the slot every few hundred ms, tearing down the
+      // peer's RTC session on every cycle. Instead we stop and let the UI
+      // show what happened; the user reclaims explicitly via Try Again.
       if (event.code === 4000) {
         emit({ type: 'error', code: 'replaced', message: event.reason });
-        // Fall through to reconnect rather than staying dead. "Replaced"
-        // fires whenever a newer connection wins the same peer slot — the
-        // intended case is a stale tab after laptop sleep, but it also
-        // fires when THIS device's own network flaps (mobile carrier IP
-        // churn) and races itself. Treating it as terminal left the losing
-        // tab silently disconnected with no retry and no visible error
-        // until a manual page reload. Reconnecting is harmless: if another
-        // session really is active, this one just loses the race again.
+        return;
       }
       const delay = BACKOFF_MS[Math.min(retryCount, BACKOFF_MS.length - 1)];
       retryCount++;
       retryTimer = setTimeout(connect, delay);
     };
 
-    ws.onerror = () => { /* onclose handles reconnect */ };
+    sock.onerror = () => { /* onclose handles reconnect */ };
   }
 
   connect();

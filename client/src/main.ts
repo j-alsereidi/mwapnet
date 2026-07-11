@@ -4,8 +4,8 @@ import { MediaManager } from './media.js';
 import { connectSignal, type SignalClient } from './signalClient.js';
 import { startRtcSession, type RtcSession } from './rtcSession.js';
 import { fetchIceConfig } from './iceConfigClient.js';
-import { mountUi } from './ui.js';
-import { cameraSound } from './sound.js';
+import { mountUi, showToast } from './ui.js';
+import { prepareSounds, playSound } from './sound.js';
 import type { IceServerConfig, PeerId } from './types.js';
 
 // App-level events that piggyback on the existing `signal` relay. The server
@@ -33,12 +33,50 @@ mountUi({
   onCamToggle:   handleCamToggle,
   onCameraPick:  handleCameraPick,
   onEnterRoom:   handleEnterRoom,
-  onLeaveRoom:   () => setMyState('lobby'),
+  onLeaveRoom:   handleLeaveRoom,
   onScreenShare: handleScreenShare,
   onCameraFlip:  () => { void handleCameraFlip(); },
   onRetry:       () => { void bootstrap(); },
   onToggleHideSelf: handleToggleHideSelf,
 });
+
+// Unlock the AudioContext and start decoding all sound effects on the very
+// first tap/click anywhere. Remote-triggered sounds (peer joins the lobby,
+// peer enters the room) can only play after some local gesture — this makes
+// that gesture "any interaction at all" rather than a specific button.
+document.addEventListener('pointerdown', () => prepareSounds(), { once: true });
+
+// ── Screen wake lock ─────────────────────────────────────────────────────────
+// While in the room, stop the phone from idle-sleeping. Without this, Android
+// dims → locks after the idle timeout, the browser is backgrounded, and the
+// OS cuts camera (always) and eventually mic capture — the "call goes one-way
+// after 10-20 seconds" failure. The lock is released by the OS whenever the
+// tab is hidden or the user presses the power button, so we re-acquire on
+// every return to visibility while still in the room.
+// ponytail: a deliberate manual power-button lock still backgrounds the tab —
+// whether audio survives that is up to the OS/OEM battery policy and can't be
+// controlled from a web page. Keeping the screen on during calls is the fix
+// browsers actually support.
+let wakeLock: WakeLockSentinel | null = null;
+let wakeLockPending = false;
+function syncWakeLock(): void {
+  const want = store.get().phase === 'room';
+  if (want && !wakeLock && !wakeLockPending && 'wakeLock' in navigator && document.visibilityState === 'visible') {
+    wakeLockPending = true;
+    void navigator.wakeLock.request('screen')
+      .then((lock) => {
+        wakeLock = lock;
+        lock.addEventListener('release', () => { wakeLock = null; });
+      })
+      .catch((err: unknown) => console.warn('[wakelock] request failed:', err))
+      .finally(() => { wakeLockPending = false; });
+  } else if (!want && wakeLock) {
+    void wakeLock.release();
+    wakeLock = null;
+  }
+}
+store.subscribe(syncWakeLock);
+document.addEventListener('visibilitychange', syncWakeLock);
 
 void bootstrap();
 
@@ -99,11 +137,14 @@ function handleServerMessage(msg: import('./types.js').ServerMessage): void {
       reconcileRtc();
       break;
 
-    case 'peer-state':
+    case 'peer-state': {
       console.log(`[signal] peer-state — peer is now ${msg.state}`);
+      const prev = store.get().peerPresence;
       store.set({ peerPresence: msg.state });
+      playPeerTransitionSound(prev, msg.state);
       reconcileRtc();
       break;
+    }
 
     case 'signal':
       if (isAppEvent(msg.data)) {
@@ -120,12 +161,34 @@ function handleServerMessage(msg: import('./types.js').ServerMessage): void {
       if (msg.code === 'unauthorized') {
         clearPairSecret();
         fail('Invalid pair key. Check your key and try again.');
+      } else if (msg.code === 'replaced') {
+        // Another device/tab opened this same link and took the slot.
+        // Surface it instead of dying silently — Try Again reclaims.
+        fail('This link was opened on another device or tab. Only one can be connected at a time. Tap Try Again to reconnect here.');
       }
       break;
 
     case 'pong':
       // no-op; just acknowledges our ping
       break;
+  }
+}
+
+// ── Presence transition sounds ───────────────────────────────────────────────
+// Sounds keyed on the PEER's observed transitions. Self-side counterparts of
+// the "both users" sounds are played in the respective handlers below.
+//   lobbyJoin:   peer arrived (absent → lobby). Not room → lobby.
+//   lobbyToRoom: peer stepped into the room.
+//   roomToLobby: peer left the room — back to lobby OR connection lost.
+function playPeerTransitionSound(
+  prev: import('./types.js').PeerPresence,
+  next: import('./types.js').PeerPresence
+): void {
+  if (prev === next) return;
+  if (prev === 'disconnected' && next === 'lobby') void playSound('lobbyJoin');
+  else if (prev === 'lobby' && next === 'room')    void playSound('lobbyToRoom');
+  else if (prev === 'room' && (next === 'lobby' || next === 'disconnected')) {
+    void playSound('roomToLobby');
   }
 }
 
@@ -171,6 +234,8 @@ function handleMicToggle(): void {
   const next = !store.get().micMuted;
   media.setMicMuted(next);
   store.set({ micMuted: next });
+  // Local-only feedback — the peer doesn't hear this one.
+  void playSound('micButton');
 }
 
 function handleCamToggle(): void {
@@ -180,7 +245,7 @@ function handleCamToggle(): void {
   store.set({ camOff: nextOff });
   // Pre-warm the audio decode on the first user gesture, even when toggling
   // OFF — it's free if already loaded.
-  cameraSound.prepare();
+  prepareSounds();
   // Camera transitioned off→on while in room → chime for both peers.
   if (wasOff && !nextOff && store.get().phase === 'room') {
     fireCamOn();
@@ -189,11 +254,20 @@ function handleCamToggle(): void {
 
 function handleEnterRoom(): void {
   // Pre-warm audio under the user gesture so iOS unlocks the AudioContext.
-  cameraSound.prepare();
+  prepareSounds();
   const camOn = !store.get().camOff;
   setMyState('room');
+  // Self side of "plays for BOTH users" — the peer hears it via their own
+  // peer-state transition.
+  void playSound('lobbyToRoom');
   // Entering the room with camera on counts as a cam-on event.
   if (camOn) fireCamOn();
+}
+
+function handleLeaveRoom(): void {
+  setMyState('lobby');
+  // Self side of "plays for BOTH users".
+  void playSound('roomToLobby');
 }
 
 function handleToggleHideSelf(): void {
@@ -201,7 +275,7 @@ function handleToggleHideSelf(): void {
 }
 
 function fireCamOn(): void {
-  void cameraSound.play();
+  void playSound('cameraOn');
   // Tell the peer to chime too. We always send — the peer gates on their
   // own phase, so a lobby-side peer won't hear a stale chime.
   signalClient?.send({ type: 'signal', data: { kind: 'app', event: 'cam-on' } });
@@ -211,7 +285,7 @@ function handleRemoteAppEvent(ev: AppEvent): void {
   if (ev.event === 'cam-on') {
     // Only play if we're actually in the room — otherwise the chime is
     // disconnected from anything the user is seeing.
-    if (store.get().phase === 'room') void cameraSound.play();
+    if (store.get().phase === 'room') void playSound('cameraOn');
   }
 }
 
@@ -240,10 +314,16 @@ async function handleScreenShare(): Promise<void> {
     if (sharing) await media.stopScreenShare();
     else          await media.startScreenShare();
   } catch (err) {
-    // User cancelled the share picker — not an error worth surfacing
-    if ((err as Error).name !== 'NotAllowedError') {
-      console.warn('[main] screenshare failed:', err);
-    }
+    console.warn('[main] screenshare failed:', err);
+    // Always say SOMETHING. On Android, NotAllowedError covers both "user
+    // dismissed the picker" and "the OS refused capture" — the two are
+    // indistinguishable, and swallowing them made a failing share button
+    // look like it did nothing at all.
+    showToast(
+      (err as Error).name === 'NotAllowedError'
+        ? 'Screen share didn’t start (cancelled or blocked by the OS).'
+        : 'Screen share failed on this device.'
+    );
   }
   pushScreenStateToStore();
 }
@@ -260,4 +340,8 @@ function pushScreenStateToStore(): void {
 
 function fail(message: string): void {
   store.set({ phase: 'failed', lastError: message });
+  // Failing while a call is live (e.g. slot replaced mid-room) must also
+  // tear the RTC session down — reconcileRtc is only otherwise called from
+  // explicit state transitions.
+  reconcileRtc();
 }
