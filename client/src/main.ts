@@ -39,6 +39,7 @@ mountUi({
   onCameraFlip:  () => { void handleCameraFlip(); },
   onRetry:       () => { void bootstrap(); },
   onToggleHideSelf: handleToggleHideSelf,
+  onSettingsSaved: () => { void bootstrap(); },
 });
 
 // Unlock the AudioContext and start decoding all sound effects on the very

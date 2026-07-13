@@ -315,7 +315,7 @@
     #key-input-wrap {
       display: flex; flex-direction: column; gap: 10px; width: 280px;
     }
-    #key-input {
+    .key-input {
       width: 100%; padding: 12px 16px;
       border-radius: 10px;
       border: 1px solid rgba(255,255,255,0.18);
@@ -323,7 +323,7 @@
       color: #fff; font-size: 14px; font-family: monospace;
       letter-spacing: 1px; outline: none;
     }
-    #key-input:focus { border-color: rgba(255,255,255,0.45); }
+    .key-input:focus { border-color: rgba(255,255,255,0.45); }
     .primary-btn {
       width: 100%; padding: 13px;
       border-radius: 10px; border: none;
@@ -402,6 +402,15 @@
       background: #0a0a0a;
       border-radius: 2px;
     }
+    /* Lobby settings menu — key + (native-only) server-URL editor */
+    .settings-label {
+      padding: 10px 12px 2px;
+      font-size: 12px;
+      color: rgba(255,255,255,0.5);
+    }
+    .settings-menu .key-input { margin: 0 12px 8px; width: calc(100% - 24px); }
+    .settings-menu .primary-btn { margin: 4px 12px 6px; width: calc(100% - 24px); }
+    #lobby-server-url-row.hidden { display: none; }
 
     /* Self-PiP visibility — JS toggles .hidden in the room when there's no
        outgoing video (cam off + not screensharing) or the user opted to hide it. */
@@ -459,7 +468,7 @@
     <span class="title">MWAPNET</span>
     <p class="sub">Paste your pair key to connect.</p>
     <div id="key-input-wrap">
-      <input id="key-input" type="password" placeholder="pair key" autocomplete="off" spellcheck="false" />
+      <input id="key-input" class="key-input" type="password" placeholder="pair key" autocomplete="off" spellcheck="false" />
       <button id="key-submit" class="primary-btn">Connect</button>
     </div>
   </div>
@@ -479,6 +488,16 @@
 
   <!-- Lobby -->
   <div id="screen-lobby" class="screen">
+    <button class="settings-btn" id="lobby-settings-btn" title="Settings" aria-label="Settings"></button>
+    <div id="lobby-settings-menu" class="settings-menu hidden" role="menu">
+      <div class="settings-label">Pair key</div>
+      <input id="lobby-key-input" class="key-input" type="password" autocomplete="off" spellcheck="false" />
+      <div id="lobby-server-url-row" class="hidden">
+        <div class="settings-label">Server URL</div>
+        <input id="lobby-server-url-input" class="key-input" type="text" autocomplete="off" spellcheck="false" />
+      </div>
+      <button id="lobby-key-save" class="primary-btn">Save &amp; reconnect</button>
+    </div>
     <div class="lobby-title">MWAPNET</div>
     <div class="lobby-card">
       <video id="lobby-preview" autoplay playsinline muted></video>

@@ -1,6 +1,7 @@
 import { store } from './store.js';
 import type { ClientState, PeerPresence } from './types.js';
 import { ICONS, iconHtml } from './icons.js';
+import { pairKeyStore, serverUrlKeyStore } from '@keystore';
 
 // Detect a "real" pointer device (mouse / trackpad) so we can scope :hover
 // styles to it. Pure CSS `@media (hover: hover)` is unreliable — some
@@ -26,6 +27,7 @@ export interface UiHandlers {
   onCameraFlip():      void;
   onRetry():           void;
   onToggleHideSelf():  void;
+  onSettingsSaved():   void;
 }
 
 // DOM refs cached on mount (much faster than getElementById on every render)
@@ -55,6 +57,12 @@ interface Dom {
   settingsBtn:      HTMLButtonElement;
   settingsMenu:     HTMLElement;
   settingsHideSelf: HTMLButtonElement;
+  lobbySettingsBtn:    HTMLButtonElement;
+  lobbySettingsMenu:   HTMLElement;
+  lobbyKeyInput:       HTMLInputElement;
+  lobbyServerUrlRow:   HTMLElement;
+  lobbyServerUrlInput: HTMLInputElement;
+  lobbyKeySave:        HTMLButtonElement;
 }
 
 let dom: Dom;
@@ -93,6 +101,12 @@ export function mountUi(handlers: UiHandlers): void {
     settingsBtn:      document.getElementById('settings-btn')        as HTMLButtonElement,
     settingsMenu:     document.getElementById('settings-menu')!,
     settingsHideSelf: document.getElementById('settings-hide-self')  as HTMLButtonElement,
+    lobbySettingsBtn:    document.getElementById('lobby-settings-btn')     as HTMLButtonElement,
+    lobbySettingsMenu:   document.getElementById('lobby-settings-menu')!,
+    lobbyKeyInput:       document.getElementById('lobby-key-input')        as HTMLInputElement,
+    lobbyServerUrlRow:   document.getElementById('lobby-server-url-row')!,
+    lobbyServerUrlInput: document.getElementById('lobby-server-url-input') as HTMLInputElement,
+    lobbyKeySave:        document.getElementById('lobby-key-save')         as HTMLButtonElement,
   };
 
   // Wire handlers
@@ -107,7 +121,9 @@ export function mountUi(handlers: UiHandlers): void {
   dom.retryBtn.onclick      = handlers.onRetry;
   dom.cameraPicker.onchange = () => handlers.onCameraPick(dom.cameraPicker.value);
 
-  // Settings menu — gear toggles the dropdown, clicks outside close it.
+  // Settings menus (room + lobby) — gear toggles its dropdown, clicks
+  // outside either one close it. Both share this generic open/close plumbing;
+  // each menu's own content-specific behavior is wired separately below.
   dom.settingsBtn.onclick = (e) => {
     e.stopPropagation();
     dom.settingsMenu.classList.toggle('hidden');
@@ -116,13 +132,51 @@ export function mountUi(handlers: UiHandlers): void {
     e.stopPropagation();
     handlers.onToggleHideSelf();
   };
-  // Swallow inside-menu clicks so the document handler below doesn't close it.
-  dom.settingsMenu.addEventListener('click', (e) => e.stopPropagation());
+
+  dom.lobbySettingsBtn.onclick = (e) => {
+    e.stopPropagation();
+    const opening = dom.lobbySettingsMenu.classList.contains('hidden');
+    dom.lobbySettingsMenu.classList.toggle('hidden');
+    if (opening) {
+      void pairKeyStore.get().then((v) => { dom.lobbyKeyInput.value = v ?? ''; });
+      if (__PLATFORM__ !== 'web') {
+        dom.lobbyServerUrlRow.classList.remove('hidden');
+        void serverUrlKeyStore.get().then((v) => {
+          dom.lobbyServerUrlInput.value = v ?? __SERVER_BASE_URL_DEFAULT__;
+        });
+      }
+    }
+  };
+  dom.lobbyKeySave.onclick = (e) => {
+    e.stopPropagation();
+    const newKey = dom.lobbyKeyInput.value.trim();
+    if (!newKey) return;
+    void (async () => {
+      await pairKeyStore.set(newKey);
+      if (__PLATFORM__ !== 'web') {
+        const url = dom.lobbyServerUrlInput.value.trim();
+        if (url) await serverUrlKeyStore.set(url);
+      }
+      dom.lobbySettingsMenu.classList.add('hidden');
+      handlers.onSettingsSaved();
+    })();
+  };
+
+  const settingsPairs: Array<[HTMLButtonElement, HTMLElement]> = [
+    [dom.settingsBtn, dom.settingsMenu],
+    [dom.lobbySettingsBtn, dom.lobbySettingsMenu],
+  ];
+  for (const [, menu] of settingsPairs) {
+    // Swallow inside-menu clicks so the document handler below doesn't close it.
+    menu.addEventListener('click', (e) => e.stopPropagation());
+  }
   document.addEventListener('pointerdown', (e) => {
-    if (dom.settingsMenu.classList.contains('hidden')) return;
-    if (e.target === dom.settingsBtn || dom.settingsBtn.contains(e.target as Node)) return;
-    if (dom.settingsMenu.contains(e.target as Node)) return;
-    dom.settingsMenu.classList.add('hidden');
+    for (const [btn, menu] of settingsPairs) {
+      if (menu.classList.contains('hidden')) continue;
+      if (e.target === btn || btn.contains(e.target as Node)) continue;
+      if (menu.contains(e.target as Node)) continue;
+      menu.classList.add('hidden');
+    }
   });
 
   // Screen-share button is always shown. Android Chrome supports
@@ -219,6 +273,7 @@ let lastLocalVideoTrackId: string | null = null;
 let lastRemoteStreamId: string | null = null;
 let lastLocalHidden = false;
 let lastPeerPresence: PeerPresence | null = null;
+let lastPhase: ClientState['phase'] | null = null;
 
 function render(s: ClientState): void {
   // Active screen
@@ -300,9 +355,14 @@ function render(s: ClientState): void {
   if (s.phase === 'room') {
     dom.lobbyBanner.classList.toggle('hidden', s.peerPresence !== 'lobby');
     setRoomOverlay(s);
-  } else {
-    // Settings menu only makes sense in the room — auto-close on leave.
+  }
+  // Auto-close both settings menus on any actual phase change (not every
+  // render) — e.g. leaving the room, or the lobby settings panel's own
+  // "save & reconnect" cycling back through 'connecting'.
+  if (s.phase !== lastPhase) {
     dom.settingsMenu.classList.add('hidden');
+    dom.lobbySettingsMenu.classList.add('hidden');
+    lastPhase = s.phase;
   }
 
   // ── Camera PiP visibility (#local) ────────────────────────────────────
