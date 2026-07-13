@@ -5,9 +5,16 @@ import { connectSignal, type SignalClient } from './signalClient.js';
 import { startRtcSession, type RtcSession } from './rtcSession.js';
 import { fetchIceConfig } from './iceConfigClient.js';
 import { mountUi, showToast } from './ui.js';
-import { prepareSounds, playSound } from './sound.js';
+import {
+  prepareSounds, playSound, playRandomSfx, playVineBoomTest,
+  setSfxVolume, setSfxMuted, setVineBoomVolume, setVineBoomMuted,
+} from './sound.js';
 import { getServerBaseUrl } from './serverConfig.js';
 import { syncForegroundService } from '@foreground-service';
+import {
+  sfxVolumeStore, sfxMutedStore, vineBoomVolumeStore, vineBoomMutedStore,
+  exitMeowsEnabledStore, debugModeStore,
+} from '@keystore';
 import type { IceServerConfig, PeerId } from './types.js';
 
 // App-level events that piggyback on the existing `signal` relay. The server
@@ -41,6 +48,14 @@ mountUi({
   onRetry:       () => { void bootstrap(); },
   onToggleHideSelf: handleToggleHideSelf,
   onSettingsSaved: () => { void bootstrap(); },
+  onToggleExitMeows: handleToggleExitMeows,
+  onToggleDebugMode: handleToggleDebugMode,
+  onSfxMuteToggle: handleSfxMuteToggle,
+  onVineBoomMuteToggle: handleVineBoomMuteToggle,
+  onSfxVolumeChange: handleSfxVolumeChange,
+  onVineBoomVolumeChange: handleVineBoomVolumeChange,
+  onTestSfx: playRandomSfx,
+  onTestVineBoom: playVineBoomTest,
 });
 
 // Unlock the AudioContext and start decoding all sound effects on the very
@@ -87,7 +102,80 @@ document.addEventListener('visibilitychange', syncWakeLock);
 // above.
 store.subscribe(syncForegroundService);
 
-void bootstrap();
+void loadPersistedSettings().then(() => bootstrap());
+
+// ── Persisted settings ───────────────────────────────────────────────────────
+async function loadPersistedSettings(): Promise<void> {
+  const [sfxVolumeRaw, sfxMutedRaw, vineBoomVolumeRaw, vineBoomMutedRaw, exitMeowsRaw, debugModeRaw] =
+    await Promise.all([
+      sfxVolumeStore.get(), sfxMutedStore.get(),
+      vineBoomVolumeStore.get(), vineBoomMutedStore.get(),
+      exitMeowsEnabledStore.get(), debugModeStore.get(),
+    ]);
+
+  const sfxVolume = sfxVolumeRaw !== null ? Number(sfxVolumeRaw) : 100;
+  const sfxMuted = sfxMutedRaw === 'true';
+  const vineBoomVolume = vineBoomVolumeRaw !== null ? Number(vineBoomVolumeRaw) : 100;
+  const vineBoomMuted = vineBoomMutedRaw === 'true';
+  const debugMode = debugModeRaw === 'true';
+
+  let exitMeowsEnabled: boolean;
+  if (exitMeowsRaw !== null) {
+    exitMeowsEnabled = exitMeowsRaw === 'true';
+  } else {
+    // First run ever: default disabled overnight (9pm-6am local), enabled
+    // otherwise. Computed once and persisted immediately so it doesn't
+    // silently flip later just because the clock crossed the boundary.
+    const hour = new Date().getHours();
+    exitMeowsEnabled = !(hour >= 21 || hour < 6);
+    await exitMeowsEnabledStore.set(String(exitMeowsEnabled));
+  }
+
+  setSfxVolume(sfxVolume);
+  setSfxMuted(sfxMuted);
+  setVineBoomVolume(vineBoomVolume);
+  setVineBoomMuted(vineBoomMuted);
+
+  store.set({ sfxVolume, sfxMuted, vineBoomVolume, vineBoomMuted, exitMeowsEnabled, debugMode });
+}
+
+function handleToggleExitMeows(): void {
+  const next = !store.get().exitMeowsEnabled;
+  store.set({ exitMeowsEnabled: next });
+  void exitMeowsEnabledStore.set(String(next));
+}
+
+function handleToggleDebugMode(): void {
+  const next = !store.get().debugMode;
+  store.set({ debugMode: next });
+  void debugModeStore.set(String(next));
+}
+
+function handleSfxMuteToggle(): void {
+  const next = !store.get().sfxMuted;
+  setSfxMuted(next);
+  store.set({ sfxMuted: next });
+  void sfxMutedStore.set(String(next));
+}
+
+function handleVineBoomMuteToggle(): void {
+  const next = !store.get().vineBoomMuted;
+  setVineBoomMuted(next);
+  store.set({ vineBoomMuted: next });
+  void vineBoomMutedStore.set(String(next));
+}
+
+function handleSfxVolumeChange(value: number): void {
+  setSfxVolume(value);
+  store.set({ sfxVolume: value });
+  void sfxVolumeStore.set(String(value));
+}
+
+function handleVineBoomVolumeChange(value: number): void {
+  setVineBoomVolume(value);
+  store.set({ vineBoomVolume: value });
+  void vineBoomVolumeStore.set(String(value));
+}
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 async function bootstrap(): Promise<void> {
@@ -203,7 +291,9 @@ function playPeerTransitionSound(
   if (prev === 'disconnected' && next === 'lobby') void playSound('lobbyJoin');
   else if (prev === 'lobby' && next === 'room')    void playSound('lobbyToRoom');
   else if (prev === 'room' && (next === 'lobby' || next === 'disconnected')) {
-    void playSound('roomToLobby');
+    // This is the PEER leaving — gated by "mute exit meows". The self-side
+    // leave sound in handleLeaveRoom() stays unconditional.
+    if (store.get().exitMeowsEnabled) void playSound('roomToLobby');
   }
 }
 

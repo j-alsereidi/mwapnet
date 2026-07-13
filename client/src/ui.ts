@@ -28,6 +28,14 @@ export interface UiHandlers {
   onRetry():           void;
   onToggleHideSelf():  void;
   onSettingsSaved():   void;
+  onToggleExitMeows(): void;
+  onToggleDebugMode(): void;
+  onSfxMuteToggle():   void;
+  onVineBoomMuteToggle(): void;
+  onSfxVolumeChange(value: number):      void;
+  onVineBoomVolumeChange(value: number): void;
+  onTestSfx():      void;
+  onTestVineBoom(): void;
 }
 
 // DOM refs cached on mount (much faster than getElementById on every render)
@@ -57,12 +65,24 @@ interface Dom {
   settingsBtn:      HTMLButtonElement;
   settingsMenu:     HTMLElement;
   settingsHideSelf: HTMLButtonElement;
+  settingsExitMeows: HTMLButtonElement;
+  settingsOpenPage:  HTMLButtonElement;
   lobbySettingsBtn:    HTMLButtonElement;
-  lobbySettingsMenu:   HTMLElement;
-  lobbyKeyInput:       HTMLInputElement;
-  lobbyServerUrlRow:   HTMLElement;
-  lobbyServerUrlInput: HTMLInputElement;
-  lobbyKeySave:        HTMLButtonElement;
+
+  settingsPage:       HTMLElement;
+  settingsPageClose:  HTMLButtonElement;
+  sfxVolumeSlider:      HTMLInputElement;
+  sfxMuteBtn:           HTMLButtonElement;
+  sfxTestBtn:           HTMLButtonElement;
+  vineBoomVolumeSlider: HTMLInputElement;
+  vineBoomMuteBtn:      HTMLButtonElement;
+  vineBoomTestBtn:      HTMLButtonElement;
+  settingsPageExitMeows:    HTMLButtonElement;
+  settingsPageKeyInput:     HTMLInputElement;
+  settingsPageServerUrlRow: HTMLElement;
+  settingsPageServerUrlInput: HTMLInputElement;
+  settingsPageKeySave:        HTMLButtonElement;
+  settingsPageDebugMode:      HTMLButtonElement;
 }
 
 let dom: Dom;
@@ -101,12 +121,24 @@ export function mountUi(handlers: UiHandlers): void {
     settingsBtn:      document.getElementById('settings-btn')        as HTMLButtonElement,
     settingsMenu:     document.getElementById('settings-menu')!,
     settingsHideSelf: document.getElementById('settings-hide-self')  as HTMLButtonElement,
+    settingsExitMeows: document.getElementById('settings-exit-meows') as HTMLButtonElement,
+    settingsOpenPage:  document.getElementById('settings-open-page')  as HTMLButtonElement,
     lobbySettingsBtn:    document.getElementById('lobby-settings-btn')     as HTMLButtonElement,
-    lobbySettingsMenu:   document.getElementById('lobby-settings-menu')!,
-    lobbyKeyInput:       document.getElementById('lobby-key-input')        as HTMLInputElement,
-    lobbyServerUrlRow:   document.getElementById('lobby-server-url-row')!,
-    lobbyServerUrlInput: document.getElementById('lobby-server-url-input') as HTMLInputElement,
-    lobbyKeySave:        document.getElementById('lobby-key-save')         as HTMLButtonElement,
+
+    settingsPage:      document.getElementById('settings-page')!,
+    settingsPageClose: document.getElementById('settings-page-close') as HTMLButtonElement,
+    sfxVolumeSlider:      document.getElementById('sfx-volume-slider')      as HTMLInputElement,
+    sfxMuteBtn:           document.getElementById('sfx-mute-btn')           as HTMLButtonElement,
+    sfxTestBtn:           document.getElementById('sfx-test-btn')          as HTMLButtonElement,
+    vineBoomVolumeSlider: document.getElementById('vineboom-volume-slider') as HTMLInputElement,
+    vineBoomMuteBtn:      document.getElementById('vineboom-mute-btn')     as HTMLButtonElement,
+    vineBoomTestBtn:      document.getElementById('vineboom-test-btn')     as HTMLButtonElement,
+    settingsPageExitMeows:  document.getElementById('settings-page-exit-meows') as HTMLButtonElement,
+    settingsPageKeyInput:   document.getElementById('settings-page-key-input')  as HTMLInputElement,
+    settingsPageServerUrlRow:   document.getElementById('settings-page-server-url-row')!,
+    settingsPageServerUrlInput: document.getElementById('settings-page-server-url-input') as HTMLInputElement,
+    settingsPageKeySave:        document.getElementById('settings-page-key-save')  as HTMLButtonElement,
+    settingsPageDebugMode:      document.getElementById('settings-page-debug-mode') as HTMLButtonElement,
   };
 
   // Wire handlers
@@ -121,9 +153,7 @@ export function mountUi(handlers: UiHandlers): void {
   dom.retryBtn.onclick      = handlers.onRetry;
   dom.cameraPicker.onchange = () => handlers.onCameraPick(dom.cameraPicker.value);
 
-  // Settings menus (room + lobby) — gear toggles its dropdown, clicks
-  // outside either one close it. Both share this generic open/close plumbing;
-  // each menu's own content-specific behavior is wired separately below.
+  // Room settings — gear toggles its dropdown, clicks outside close it.
   dom.settingsBtn.onclick = (e) => {
     e.stopPropagation();
     dom.settingsMenu.classList.toggle('hidden');
@@ -132,39 +162,18 @@ export function mountUi(handlers: UiHandlers): void {
     e.stopPropagation();
     handlers.onToggleHideSelf();
   };
-
-  dom.lobbySettingsBtn.onclick = (e) => {
+  dom.settingsExitMeows.onclick = (e) => {
     e.stopPropagation();
-    const opening = dom.lobbySettingsMenu.classList.contains('hidden');
-    dom.lobbySettingsMenu.classList.toggle('hidden');
-    if (opening) {
-      void pairKeyStore.get().then((v) => { dom.lobbyKeyInput.value = v ?? ''; });
-      if (__PLATFORM__ !== 'web') {
-        dom.lobbyServerUrlRow.classList.remove('hidden');
-        void serverUrlKeyStore.get().then((v) => {
-          dom.lobbyServerUrlInput.value = v ?? __SERVER_BASE_URL_DEFAULT__;
-        });
-      }
-    }
+    handlers.onToggleExitMeows();
   };
-  dom.lobbyKeySave.onclick = (e) => {
+  dom.settingsOpenPage.onclick = (e) => {
     e.stopPropagation();
-    const newKey = dom.lobbyKeyInput.value.trim();
-    if (!newKey) return;
-    void (async () => {
-      await pairKeyStore.set(newKey);
-      if (__PLATFORM__ !== 'web') {
-        const url = dom.lobbyServerUrlInput.value.trim();
-        if (url) await serverUrlKeyStore.set(url);
-      }
-      dom.lobbySettingsMenu.classList.add('hidden');
-      handlers.onSettingsSaved();
-    })();
+    dom.settingsMenu.classList.add('hidden');
+    openSettingsPage();
   };
 
   const settingsPairs: Array<[HTMLButtonElement, HTMLElement]> = [
     [dom.settingsBtn, dom.settingsMenu],
-    [dom.lobbySettingsBtn, dom.lobbySettingsMenu],
   ];
   for (const [, menu] of settingsPairs) {
     // Swallow inside-menu clicks so the document handler below doesn't close it.
@@ -178,6 +187,49 @@ export function mountUi(handlers: UiHandlers): void {
       menu.classList.add('hidden');
     }
   });
+
+  // Full settings page — opened directly from the lobby button (no dropdown)
+  // or from the room popup's "Settings" item. A fixed overlay, not a screen;
+  // it never touches store.phase so the call underneath keeps running.
+  dom.lobbySettingsBtn.onclick = (e) => {
+    e.stopPropagation();
+    openSettingsPage();
+  };
+  dom.settingsPageClose.onclick = () => closeSettingsPage();
+  dom.settingsPageExitMeows.onclick = () => handlers.onToggleExitMeows();
+  dom.settingsPageDebugMode.onclick = () => handlers.onToggleDebugMode();
+  dom.sfxMuteBtn.onclick      = () => handlers.onSfxMuteToggle();
+  dom.vineBoomMuteBtn.onclick = () => handlers.onVineBoomMuteToggle();
+  dom.sfxTestBtn.onclick      = () => handlers.onTestSfx();
+  dom.vineBoomTestBtn.onclick = () => handlers.onTestVineBoom();
+  dom.sfxVolumeSlider.oninput      = () => handlers.onSfxVolumeChange(Number(dom.sfxVolumeSlider.value));
+  dom.vineBoomVolumeSlider.oninput = () => handlers.onVineBoomVolumeChange(Number(dom.vineBoomVolumeSlider.value));
+  dom.settingsPageKeySave.onclick = () => {
+    const newKey = dom.settingsPageKeyInput.value.trim();
+    if (!newKey) return;
+    void (async () => {
+      await pairKeyStore.set(newKey);
+      if (__PLATFORM__ !== 'web') {
+        const url = dom.settingsPageServerUrlInput.value.trim();
+        if (url) await serverUrlKeyStore.set(url);
+      }
+      handlers.onSettingsSaved();
+    })();
+  };
+
+  function openSettingsPage(): void {
+    dom.settingsPage.classList.remove('hidden');
+    void pairKeyStore.get().then((v) => { dom.settingsPageKeyInput.value = v ?? ''; });
+    if (__PLATFORM__ !== 'web') {
+      dom.settingsPageServerUrlRow.classList.remove('hidden');
+      void serverUrlKeyStore.get().then((v) => {
+        dom.settingsPageServerUrlInput.value = v ?? __SERVER_BASE_URL_DEFAULT__;
+      });
+    }
+  }
+  function closeSettingsPage(): void {
+    dom.settingsPage.classList.add('hidden');
+  }
 
   // Screen-share button is always shown. Android Chrome supports
   // getDisplayMedia; if a browser doesn't, the click fails and surfaces a
@@ -199,7 +251,9 @@ export function mountUi(handlers: UiHandlers): void {
   dom.roomBtnLeave.innerHTML  = iconHtml(ICONS.door);
   dom.lobbyBtnEnter.innerHTML = `${iconHtml(ICONS.door)}<span>Enter</span>`;
   dom.settingsBtn.innerHTML       = iconHtml(ICONS.settings);
-  dom.lobbySettingsBtn.innerHTML  = iconHtml(ICONS.settings);
+  dom.lobbySettingsBtn.innerHTML  = `${iconHtml(ICONS.settings)}<span>Settings</span>`;
+  dom.sfxMuteBtn.innerHTML      = iconHtml(ICONS.mutedSpeaker);
+  dom.vineBoomMuteBtn.innerHTML = iconHtml(ICONS.mutedSpeaker);
 
   setupRoomControlAutoFade();
   setupLocalPipDrag();
@@ -357,12 +411,11 @@ function render(s: ClientState): void {
     dom.lobbyBanner.classList.toggle('hidden', s.peerPresence !== 'lobby');
     setRoomOverlay(s);
   }
-  // Auto-close both settings menus on any actual phase change (not every
-  // render) — e.g. leaving the room, or the lobby settings panel's own
+  // Auto-close the room settings dropdown on any actual phase change (not
+  // every render) — e.g. leaving the room, or the settings page's own
   // "save & reconnect" cycling back through 'connecting'.
   if (s.phase !== lastPhase) {
     dom.settingsMenu.classList.add('hidden');
-    dom.lobbySettingsMenu.classList.add('hidden');
     lastPhase = s.phase;
   }
 
@@ -389,6 +442,29 @@ function render(s: ClientState): void {
   // Settings checkbox state
   dom.settingsHideSelf.classList.toggle('on', s.hideSelfView);
   dom.settingsHideSelf.setAttribute('aria-checked', s.hideSelfView ? 'true' : 'false');
+
+  // "Mute exit meows" is phrased as a mute toggle, but the state it reflects
+  // (exitMeowsEnabled) is the inverse — on means "you CAN hear them leave".
+  const exitMeowsMuted = !s.exitMeowsEnabled;
+  for (const btn of [dom.settingsExitMeows, dom.settingsPageExitMeows]) {
+    btn.classList.toggle('on', exitMeowsMuted);
+    btn.setAttribute('aria-checked', exitMeowsMuted ? 'true' : 'false');
+  }
+
+  dom.settingsPageDebugMode.classList.toggle('on', s.debugMode);
+  dom.settingsPageDebugMode.setAttribute('aria-checked', s.debugMode ? 'true' : 'false');
+  document.documentElement.classList.toggle('debug-mode', s.debugMode);
+
+  // SFX / vine boom sliders + mute buttons — reflect persisted state, but
+  // only write when it actually differs so an in-progress drag isn't clobbered.
+  if (Number(dom.sfxVolumeSlider.value) !== s.sfxVolume) {
+    dom.sfxVolumeSlider.value = String(s.sfxVolume);
+  }
+  dom.sfxMuteBtn.classList.toggle('on', s.sfxMuted);
+  if (Number(dom.vineBoomVolumeSlider.value) !== s.vineBoomVolume) {
+    dom.vineBoomVolumeSlider.value = String(s.vineBoomVolume);
+  }
+  dom.vineBoomMuteBtn.classList.toggle('on', s.vineBoomMuted);
 
   // Footer (connection type)
   if (s.phase === 'room' && s.rtcConnected) {

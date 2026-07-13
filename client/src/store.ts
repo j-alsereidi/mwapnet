@@ -21,6 +21,16 @@ const initialState: ClientState = {
 
   hideSelfView: false,
 
+  // Placeholders — overwritten almost immediately at boot by main.ts's
+  // loadPersistedSettings(), which reads the real values (and computes
+  // exitMeowsEnabled's time-of-day default) before the first render.
+  sfxVolume: 100,
+  sfxMuted: false,
+  vineBoomVolume: 100,
+  vineBoomMuted: false,
+  exitMeowsEnabled: true,
+  debugMode: false,
+
   lastError: null,
 };
 

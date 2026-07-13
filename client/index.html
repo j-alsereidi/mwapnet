@@ -311,6 +311,11 @@
     /* Flip-camera button is mobile-only — desktop has the camera picker dropdown */
     html.has-hover #room-btn-flip { display: none; }
 
+    /* Screenshare is hidden on mobile by default (has-hover is the same
+       "real pointer device" signal used above) — Debug Mode is the override,
+       toggled via the .debug-mode class on <html> in ui.ts's render(). */
+    html:not(.has-hover):not(.debug-mode) #room-btn-screen { display: none; }
+
     /* ── Auth gate ──────────────────────────────────────────────────────── */
     #key-input-wrap {
       display: flex; flex-direction: column; gap: 10px; width: 280px;
@@ -402,15 +407,94 @@
       background: #0a0a0a;
       border-radius: 2px;
     }
-    /* Lobby settings menu — key + (native-only) server-URL editor */
     .settings-label {
       padding: 10px 12px 2px;
       font-size: 12px;
       color: rgba(255,255,255,0.5);
     }
-    .settings-menu .key-input { margin: 0 12px 8px; width: calc(100% - 24px); }
-    .settings-menu .primary-btn { margin: 4px 12px 6px; width: calc(100% - 24px); }
-    #lobby-server-url-row.hidden { display: none; }
+
+    /* Lobby's settings button carries a text label ("Settings") next to the
+       gear, unlike the room's icon-only one — it opens the full settings
+       page directly rather than a dropdown, so it reads more like a button. */
+    .settings-btn.labeled {
+      width: auto;
+      padding: 0 16px 0 12px;
+      border-radius: 999px;
+      gap: 6px;
+    }
+    .settings-btn.labeled .icon { width: 22px; height: 22px; }
+    .settings-btn.labeled span { font-size: 14px; font-weight: 500; }
+
+    /* ── Full settings page ──────────────────────────────────────────────
+       A fixed overlay, NOT a `.screen`/phase. Opening it never touches
+       store.phase, so whatever's running underneath (camera, RTC session)
+       keeps going untouched — this is deliberately just a layer on top. */
+    .settings-page {
+      position: fixed; inset: 0;
+      background: rgba(10,10,10,0.98);
+      z-index: 40;
+      overflow-y: auto;
+      padding: 20px 20px 40px;
+    }
+    .settings-page.hidden { display: none; }
+    .settings-page-header {
+      display: flex; align-items: center; justify-content: space-between;
+      max-width: 480px; margin: 0 auto 24px;
+    }
+    .settings-page-version {
+      font-size: 12px; color: rgba(255,255,255,0.4); letter-spacing: 0.3px;
+    }
+    .settings-page-close {
+      width: 36px; height: 36px;
+      background: transparent; border: none; color: #fff;
+      font-size: 26px; line-height: 1; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 999px;
+    }
+    html.has-hover .settings-page-close:hover { background: rgba(255,255,255,0.08); }
+    .settings-page-body {
+      max-width: 480px; margin: 0 auto;
+      display: flex; flex-direction: column; gap: 28px;
+    }
+    .settings-section h3 {
+      font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px;
+      color: rgba(255,255,255,0.45); font-weight: 600;
+      margin-bottom: 10px;
+    }
+    .settings-section .settings-item { margin-top: 6px; }
+    .settings-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 6px 0;
+    }
+    .settings-row-label { flex: 1 1 auto; font-size: 14px; }
+    .volume-slider { flex: 1 1 auto; max-width: 140px; accent-color: #b8a8c2; }
+    /* Mute icon: dim by default (unmuted, nothing to flag), bright/full
+       opacity when muted — the opposite of the mic/cam convention, on
+       purpose, since this is a status flag ("audio is off") worth noticing
+       rather than a primary feature toggle. */
+    .mute-icon-btn {
+      width: 32px; height: 32px;
+      background: transparent; border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0.25;
+      transition: opacity 0.15s;
+      flex-shrink: 0;
+    }
+    .mute-icon-btn.on { opacity: 1; }
+    .mute-icon-btn img { width: 22px; height: 22px; pointer-events: none; user-select: none; }
+    .test-btn {
+      flex-shrink: 0;
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.05);
+      color: #fff; font-size: 12px; cursor: pointer;
+      font-family: inherit;
+    }
+    html.has-hover .test-btn:hover { background: rgba(255,255,255,0.1); }
+    .settings-page .key-input { margin: 6px 0 12px; }
+    .settings-page .primary-btn { margin-top: 4px; }
+    #settings-page-server-url-row.hidden { display: none; }
 
     /* Self-PiP visibility — JS toggles .hidden in the room when there's no
        outgoing video (cam off + not screensharing) or the user opted to hide it. */
@@ -426,6 +510,8 @@
       pointer-events: none;
       letter-spacing: 0.3px;
     }
+    /* Debug Mode makes the connection-type text impossible to miss */
+    html.debug-mode #footer { color: #39ff14; }
 
     /* ── Tap-to-unmute overlay ─────────────────────────────────────────── */
     #unmute-overlay {
@@ -488,16 +574,9 @@
 
   <!-- Lobby -->
   <div id="screen-lobby" class="screen">
-    <button class="settings-btn" id="lobby-settings-btn" title="Settings" aria-label="Settings"></button>
-    <div id="lobby-settings-menu" class="settings-menu hidden" role="menu">
-      <div class="settings-label">Pair key</div>
-      <input id="lobby-key-input" class="key-input" type="password" autocomplete="off" spellcheck="false" />
-      <div id="lobby-server-url-row" class="hidden">
-        <div class="settings-label">Server URL</div>
-        <input id="lobby-server-url-input" class="key-input" type="text" autocomplete="off" spellcheck="false" />
-      </div>
-      <button id="lobby-key-save" class="primary-btn">Save &amp; reconnect</button>
-    </div>
+    <!-- Opens the full settings page directly (no dropdown) — see
+         #settings-page near the end of <body>. -->
+    <button class="settings-btn labeled" id="lobby-settings-btn" title="Settings" aria-label="Settings"></button>
     <div class="lobby-title">MWAPNET</div>
     <div class="lobby-card">
       <video id="lobby-preview" autoplay playsinline muted></video>
@@ -528,6 +607,13 @@
         <span>Hide my camera</span>
         <span class="check" aria-hidden="true"></span>
       </button>
+      <button class="settings-item" id="settings-exit-meows" role="menuitemcheckbox" aria-checked="false">
+        <span>Mute exit meows</span>
+        <span class="check" aria-hidden="true"></span>
+      </button>
+      <button class="settings-item" id="settings-open-page">
+        <span>Settings</span>
+      </button>
     </div>
 
     <div class="controls">
@@ -548,6 +634,56 @@
 
   <!-- Transient status toast -->
   <div id="toast" class="hidden"></div>
+
+  <!-- Full settings page — a fixed overlay, opened from either the lobby's
+       labeled button or the room popup's "Settings" item. Not a `.screen`;
+       never touches phase, so a call in progress keeps running underneath. -->
+  <div id="settings-page" class="settings-page hidden">
+    <div class="settings-page-header">
+      <div class="settings-page-version">MWAPNET v1.0.0</div>
+      <button id="settings-page-close" class="settings-page-close" aria-label="Close settings">&times;</button>
+    </div>
+    <div class="settings-page-body">
+      <section class="settings-section">
+        <h3>Audio</h3>
+        <div class="settings-row">
+          <span class="settings-row-label">SFX Volume</span>
+          <input type="range" id="sfx-volume-slider" class="volume-slider" min="0" max="100" value="100" />
+          <button class="mute-icon-btn" id="sfx-mute-btn" title="Mute SFX" aria-label="Mute SFX"></button>
+          <button class="test-btn" id="sfx-test-btn">Test</button>
+        </div>
+        <div class="settings-row">
+          <span class="settings-row-label">Vine Boom Volume</span>
+          <input type="range" id="vineboom-volume-slider" class="volume-slider" min="0" max="100" value="100" />
+          <button class="mute-icon-btn" id="vineboom-mute-btn" title="Mute Vine Boom" aria-label="Mute Vine Boom"></button>
+          <button class="test-btn" id="vineboom-test-btn">Test</button>
+        </div>
+        <button class="settings-item" id="settings-page-exit-meows" role="menuitemcheckbox" aria-checked="false">
+          <span>Mute exit meows</span>
+          <span class="check" aria-hidden="true"></span>
+        </button>
+      </section>
+
+      <section class="settings-section">
+        <h3>Network</h3>
+        <div class="settings-label">Pair key</div>
+        <input id="settings-page-key-input" class="key-input" type="password" autocomplete="off" spellcheck="false" />
+        <div id="settings-page-server-url-row" class="hidden">
+          <div class="settings-label">Server URL</div>
+          <input id="settings-page-server-url-input" class="key-input" type="text" autocomplete="off" spellcheck="false" />
+        </div>
+        <button id="settings-page-key-save" class="primary-btn">Save &amp; reconnect</button>
+      </section>
+
+      <section class="settings-section">
+        <h3>Debug</h3>
+        <button class="settings-item" id="settings-page-debug-mode" role="menuitemcheckbox" aria-checked="false">
+          <span>Debug Mode</span>
+          <span class="check" aria-hidden="true"></span>
+        </button>
+      </section>
+    </div>
+  </div>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

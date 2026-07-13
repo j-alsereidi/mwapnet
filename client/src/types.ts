@@ -44,6 +44,16 @@ export interface ClientState {
   // Doesn't affect the lobby preview.
   hideSelfView: boolean;
 
+  // Settings — persisted via keyStore, loaded once at boot (see main.ts).
+  sfxVolume: number;      // 0-100
+  sfxMuted: boolean;
+  vineBoomVolume: number; // 0-100 — cameraOn.mp3 only
+  vineBoomMuted: boolean;
+  // Whether you hear roomToLobby.mp3 when the OTHER peer leaves the room.
+  // Doesn't affect the sound playing for your OWN departure.
+  exitMeowsEnabled: boolean;
+  debugMode: boolean;
+
   lastError: string | null;
 }
 

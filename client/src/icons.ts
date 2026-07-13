@@ -8,6 +8,7 @@ export const ICONS = {
   door:     '/icons/door.png',
   flip:     '/icons/flip.png',
   settings: '/icons/gear.png',
+  mutedSpeaker: '/icons/muted_speaker.png',
 } as const;
 
 export type IconName = typeof ICONS[keyof typeof ICONS];
