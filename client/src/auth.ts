@@ -1,12 +1,14 @@
-const LS_KEY = 'duo_pair_secret';
+import { pairKeyStore } from '@keystore';
 
 export async function getPairSecret(): Promise<string> {
-  // 1. URL fragment — never sent to server in HTTP requests
+  // 1. URL fragment — never sent to server in HTTP requests. Web-only in
+  // practice: native shells have no address bar to put a fragment in, so
+  // this branch never fires there and falls through to steps 2/3.
   const hash = location.hash;
   if (hash.startsWith('#k=')) {
     const secret = decodeURIComponent(hash.slice(3));
     if (secret) {
-      localStorage.setItem(LS_KEY, secret);
+      await pairKeyStore.set(secret);
       // Scrub the secret from the address bar immediately
       history.replaceState({}, '', location.pathname + location.search);
       return secret;
@@ -14,7 +16,7 @@ export async function getPairSecret(): Promise<string> {
   }
 
   // 2. Persisted key
-  const stored = localStorage.getItem(LS_KEY);
+  const stored = await pairKeyStore.get();
   if (stored) return stored;
 
   // 3. Manual entry via auth screen
@@ -30,7 +32,7 @@ export async function getPairSecret(): Promise<string> {
     function submit(): void {
       const val = input.value.trim();
       if (!val) return;
-      localStorage.setItem(LS_KEY, val);
+      void pairKeyStore.set(val);
       authScreen.classList.remove('active');
       connecting.classList.add('active');
       resolve(val);
@@ -42,6 +44,6 @@ export async function getPairSecret(): Promise<string> {
   });
 }
 
-export function clearPairSecret(): void {
-  localStorage.removeItem(LS_KEY);
+export async function clearPairSecret(): Promise<void> {
+  await pairKeyStore.clear();
 }

@@ -92,6 +92,36 @@ TURN back end is chosen by which variables are set, in priority order: `ICE_SERV
 
 Note that anyone holding a pair secret can join as that peer, so treat the links as you would a password. Rotating the secrets is a matter of changing the two environment variables and restarting.
 
+## Build targets
+
+`client/` is the single source of truth for all UI and call logic. Three shells build from it. Only `client/src/keystore/` and `client/src/foregroundService/` differ per platform — one implementation file per target, selected at build time via a Vite alias keyed on `--mode`, so a native-only dependency (`@capacitor/preferences`, `tauri-plugin-store`, the Android foreground-service plugin) never reaches the web bundle. Everything else — the WebRTC session, the UI, the store — is fully shared.
+
+### Web
+
+Unaffected by any of the below — `npm run build` in `client/` is the exact command Docker already runs, unchanged. See "Running it with Docker" above.
+
+### Android (Capacitor)
+
+```bash
+npm run build:capacitor --prefix client
+cd capacitor
+npx cap sync android
+npx cap open android      # opens Android Studio, or:
+cd android && ./gradlew assembleDebug
+```
+
+Requires Android Studio with the SDK, NDK, and `ANDROID_HOME`/`JAVA_HOME` set — see [Tauri's prerequisites page](https://v2.tauri.app/start/prerequisites/) for the same setup (the Android tooling requirement is identical regardless of which shell you're building). By default the app talks to `PUBLIC_TURN_HOST`'s deployed backend; override it from the lobby's settings panel (gear icon) after install.
+
+### Desktop (Tauri)
+
+```bash
+npm install               # repo root — installs @tauri-apps/cli
+npx tauri dev              # runs client's dev server + opens a window
+npx tauri build             # produces an installer in src-tauri/target/release/bundle/
+```
+
+Needs the Rust toolchain (`rustup`) plus the OS-specific prerequisites Tauri documents for [Windows/macOS/Linux](https://v2.tauri.app/start/prerequisites/). No Node frontend framework required — `client/` is a plain Vite/TypeScript project Tauri points at directly via `frontendDist`.
+
 ## License
 
 MIT. See [`LICENSE`](./LICENSE).

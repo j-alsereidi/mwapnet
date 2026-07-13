@@ -1,0 +1,5 @@
+{
+  "appId": "net.mwap.app",
+  "appName": "MWAPNET",
+  "webDir": "../client/dist"
+}

@@ -6,6 +6,8 @@ import { startRtcSession, type RtcSession } from './rtcSession.js';
 import { fetchIceConfig } from './iceConfigClient.js';
 import { mountUi, showToast } from './ui.js';
 import { prepareSounds, playSound } from './sound.js';
+import { getServerBaseUrl } from './serverConfig.js';
+import { syncForegroundService } from '@foreground-service';
 import type { IceServerConfig, PeerId } from './types.js';
 
 // App-level events that piggyback on the existing `signal` relay. The server
@@ -38,6 +40,7 @@ mountUi({
   onCameraFlip:  () => { void handleCameraFlip(); },
   onRetry:       () => { void bootstrap(); },
   onToggleHideSelf: handleToggleHideSelf,
+  onSettingsSaved: () => { void bootstrap(); },
 });
 
 // Unlock the AudioContext and start decoding all sound effects on the very
@@ -78,6 +81,12 @@ function syncWakeLock(): void {
 store.subscribe(syncWakeLock);
 document.addEventListener('visibilitychange', syncWakeLock);
 
+// Android-only foreground service (see client/src/foregroundService — no-op
+// on web/tauri). Keeps mic access alive across an app-switch backgrounding;
+// does not survive a deliberate screen lock, same ceiling as the wake lock
+// above.
+store.subscribe(syncForegroundService);
+
 void bootstrap();
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
@@ -111,16 +120,22 @@ async function bootstrap(): Promise<void> {
     store.set({ cameras: await media.listCameras() });
   } catch { /* device enumeration is non-critical */ }
 
-  // 3. ICE servers. Failure here is non-fatal — fall back to public STUN.
+  // 3. Resolve the backend address. Web: location.origin (the app is served
+  // BY the backend). Native: a configured absolute URL — the webview's own
+  // origin (capacitor://localhost, tauri://localhost) has nothing to do
+  // with where the backend actually lives.
+  const baseUrl = await getServerBaseUrl();
+
+  // 4. ICE servers. Failure here is non-fatal — fall back to public STUN.
   try {
-    iceConfig = await fetchIceConfig({ baseUrl: location.origin, pairSecret });
+    iceConfig = await fetchIceConfig({ baseUrl, pairSecret });
   } catch (err) {
     console.warn('[main] ICE config fetch failed, using STUN-only fallback:', err);
     iceConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], ttlSeconds: 600 };
   }
 
-  // 4. Open the signaling WebSocket. The hello message will move us to lobby.
-  const wsUrl = location.origin.replace(/^http/, 'ws') + '/signal';
+  // 5. Open the signaling WebSocket. The hello message will move us to lobby.
+  const wsUrl = baseUrl.replace(/^http/, 'ws') + '/signal';
   signalClient?.close();
   signalClient = connectSignal({ url: wsUrl, pairSecret });
   signalClient.onMessage(handleServerMessage);
@@ -159,7 +174,7 @@ function handleServerMessage(msg: import('./types.js').ServerMessage): void {
     case 'error':
       console.warn('[signal] error', msg.code, msg.message);
       if (msg.code === 'unauthorized') {
-        clearPairSecret();
+        void clearPairSecret();
         fail('Invalid pair key. Check your key and try again.');
       } else if (msg.code === 'replaced') {
         // Another device/tab opened this same link and took the slot.
