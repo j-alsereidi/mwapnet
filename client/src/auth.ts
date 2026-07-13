@@ -15,8 +15,17 @@ export async function getPairSecret(): Promise<string> {
     }
   }
 
-  // 2. Persisted key
-  const stored = await pairKeyStore.get();
+  // 2. Persisted key. A read failure here must NOT brick the app — treat it
+  // as "nothing stored" and fall through to manual entry. Otherwise a
+  // storage-layer problem (e.g. a native plugin not registered) throws all
+  // the way up to bootstrap and dead-ends on the error screen, when the
+  // right thing is simply to ask the user for their key.
+  let stored: string | null = null;
+  try {
+    stored = await pairKeyStore.get();
+  } catch (err) {
+    console.warn('[auth] key store read failed, falling back to manual entry:', err);
+  }
   if (stored) return stored;
 
   // 3. Manual entry via auth screen
