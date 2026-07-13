@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../client/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm run dev --prefix client",
-    "beforeBuildCommand": "npm run build --prefix client"
+    "beforeDevCommand": "npm run dev:tauri --prefix client",
+    "beforeBuildCommand": "npm run build:tauri --prefix client"
   },
   "app": {
     "windows": [

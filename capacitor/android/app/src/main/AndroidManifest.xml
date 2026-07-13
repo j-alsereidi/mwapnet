@@ -52,6 +52,11 @@
          PermissionRequest once approved — no plugin needed for this part. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Capacitor's getUserMedia audio permission check also requires
+         MODIFY_AUDIO_SETTINGS to be declared. It's a normal (auto-granted)
+         permission, but if it's absent entirely the audio-capture request is
+         denied even after RECORD_AUDIO is granted at runtime. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Foreground service (see the <service> declaration above). Note:
          POST_NOTIFICATIONS is already merged in automatically from the
          plugin's own manifest — not duplicated here.
