@@ -1,0 +1,14 @@
+# Native shell build outputs — irrelevant to the server image and large
+# enough (Gradle/.gradle, Cargo target/) to slow down every build-context
+# upload otherwise. The Dockerfile only ever COPYs server/ and client/
+# explicitly, so this is a build-speed fix, not a correctness one.
+capacitor/
+src-tauri/
+
+client/node_modules/
+client/dist/
+server/node_modules/
+server/dist/
+
+.git/
+*.md

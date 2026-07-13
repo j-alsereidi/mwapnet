@@ -92,6 +92,18 @@ TURN back end is chosen by which variables are set, in priority order: `ICE_SERV
 
 Note that anyone holding a pair secret can join as that peer, so treat the links as you would a password. Rotating the secrets is a matter of changing the two environment variables and restarting.
 
+## Build targets
+
+`client/` is the single source of truth for all UI and call logic. Three shells build from it:
+
+| Target | Directory | Status |
+| --- | --- | --- |
+| Web | `client/` → `docker compose` (see above) | Shipping |
+| Android | `capacitor/` | In progress (`native-shells` branch) |
+| Desktop | `src-tauri/` | In progress (`native-shells` branch) |
+
+Only `client/src/keystore/` and `client/src/foregroundService/` differ per platform — one implementation file per target, selected at build time via a Vite alias keyed on `--mode`, so a native-only dependency (`@capacitor/preferences`, `tauri-plugin-store`) never reaches the web bundle. Everything else — the WebRTC session, the UI, the store — is fully shared. The web build (`npm run build` in `client/`) is unaffected by any of this; it's the exact command Docker already runs.
+
 ## License
 
 MIT. See [`LICENSE`](./LICENSE).
