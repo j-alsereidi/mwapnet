@@ -2,14 +2,6 @@ import { store } from './store.js';
 import type { ClientState, PeerPresence } from './types.js';
 import { ICONS, iconHtml } from './icons.js';
 
-// getDisplayMedia is absent on iOS Safari and some older mobile browsers.
-// The button is hidden on those platforms rather than silently failing.
-// Chrome on Android supports it and shows the button normally.
-const SCREEN_SHARE_SUPPORTED =
-  typeof navigator !== 'undefined' &&
-  !!navigator.mediaDevices &&
-  typeof (navigator.mediaDevices as MediaDevices & { getDisplayMedia?: unknown }).getDisplayMedia === 'function';
-
 // Detect a "real" pointer device (mouse / trackpad) so we can scope :hover
 // styles to it. Pure CSS `@media (hover: hover)` is unreliable — some
 // Android Chrome builds report it as truthy on touch devices, which causes
@@ -133,8 +125,9 @@ export function mountUi(handlers: UiHandlers): void {
     dom.settingsMenu.classList.add('hidden');
   });
 
-  // Hide on platforms where getDisplayMedia is absent (iOS Safari, etc.)
-  if (!SCREEN_SHARE_SUPPORTED) dom.roomBtnScreen.style.display = 'none';
+  // Screen-share button is always shown. Android Chrome supports
+  // getDisplayMedia; if a browser doesn't, the click fails and surfaces a
+  // toast (see handleScreenShare) instead of the button silently vanishing.
 
   // Gate :hover styles on confirmed pointer devices only. CSS without this
   // class never matches `.has-hover .ctrl-btn:hover`, so touch screens

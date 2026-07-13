@@ -318,11 +318,15 @@ async function handleScreenShare(): Promise<void> {
     // Always say SOMETHING. On Android, NotAllowedError covers both "user
     // dismissed the picker" and "the OS refused capture" — the two are
     // indistinguishable, and swallowing them made a failing share button
-    // look like it did nothing at all.
+    // look like it did nothing at all. For any OTHER error, show the actual
+    // name + message so a real device failure is diagnosable on the spot
+    // (e.g. a browser genuinely lacking getDisplayMedia throws a TypeError).
+    const e = err as Error;
     showToast(
-      (err as Error).name === 'NotAllowedError'
-        ? 'Screen share didn’t start (cancelled or blocked by the OS).'
-        : 'Screen share failed on this device.'
+      e.name === 'NotAllowedError'
+        ? 'Screen share cancelled or blocked.'
+        : `Screen share failed: ${e.name || 'error'} — ${e.message || 'unknown'}`,
+      6000
     );
   }
   pushScreenStateToStore();
