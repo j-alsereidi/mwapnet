@@ -198,7 +198,8 @@ export function mountUi(handlers: UiHandlers): void {
   dom.roomBtnFlip.innerHTML   = iconHtml(ICONS.flip);
   dom.roomBtnLeave.innerHTML  = iconHtml(ICONS.door);
   dom.lobbyBtnEnter.innerHTML = `${iconHtml(ICONS.door)}<span>Enter</span>`;
-  dom.settingsBtn.innerHTML   = iconHtml(ICONS.settings);
+  dom.settingsBtn.innerHTML       = iconHtml(ICONS.settings);
+  dom.lobbySettingsBtn.innerHTML  = iconHtml(ICONS.settings);
 
   setupRoomControlAutoFade();
   setupLocalPipDrag();
