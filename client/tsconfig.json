@@ -6,7 +6,16 @@
     "strict": true,
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      // Matches vite.config.ts's resolve.alias. tsc has no notion of Vite's
+      // per-mode aliasing, so this always points at the web implementation
+      // for type-checking purposes — good enough since all three platform
+      // files implement the same KeyStore interface (see types.ts).
+      "@keystore": ["./src/keystore/index.web.ts"],
+      "@foreground-service": ["./src/foregroundService/index.web.ts"]
+    }
   },
   "include": ["src"]
 }
