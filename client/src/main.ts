@@ -7,6 +7,7 @@ import { fetchIceConfig } from './iceConfigClient.js';
 import { mountUi, showToast } from './ui.js';
 import { prepareSounds, playSound } from './sound.js';
 import { getServerBaseUrl } from './serverConfig.js';
+import { syncForegroundService } from '@foreground-service';
 import type { IceServerConfig, PeerId } from './types.js';
 
 // App-level events that piggyback on the existing `signal` relay. The server
@@ -79,6 +80,12 @@ function syncWakeLock(): void {
 }
 store.subscribe(syncWakeLock);
 document.addEventListener('visibilitychange', syncWakeLock);
+
+// Android-only foreground service (see client/src/foregroundService — no-op
+// on web/tauri). Keeps mic access alive across an app-switch backgrounding;
+// does not survive a deliberate screen lock, same ceiling as the wake lock
+// above.
+store.subscribe(syncForegroundService);
 
 void bootstrap();
 

@@ -17,6 +17,7 @@
   "dependencies": {
     "@capacitor/core": "^8.4.1",
     "@capacitor/preferences": "^8.0.1",
+    "@capawesome-team/capacitor-android-foreground-service": "^8.1.0",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-store": "^2.4.3"
   }

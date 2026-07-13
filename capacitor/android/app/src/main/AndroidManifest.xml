@@ -33,6 +33,15 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- @capawesome-team/capacitor-android-foreground-service. Type is
+             "microphone" — the only foreground-service type this app needs
+             (keeps mic access alive across an app-switch backgrounding on
+             Android 14+; does not survive a deliberate screen lock). -->
+        <receiver android:name="io.capawesome.capacitorjs.plugins.foregroundservice.NotificationActionBroadcastReceiver" />
+        <service
+            android:name="io.capawesome.capacitorjs.plugins.foregroundservice.AndroidForegroundService"
+            android:foregroundServiceType="microphone" />
     </application>
 
     <!-- Permissions -->
@@ -43,4 +52,13 @@
          PermissionRequest once approved — no plugin needed for this part. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Foreground service (see the <service> declaration above). Note:
+         POST_NOTIFICATIONS is already merged in automatically from the
+         plugin's own manifest — not duplicated here.
+         SYSTEM_ALERT_WINDOW is deliberately NOT requested: it's only needed
+         for the plugin's moveToForeground()/overlay-permission feature,
+         which this app never calls. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 </manifest>
