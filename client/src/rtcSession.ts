@@ -2,6 +2,7 @@ import type { IceServerConfig, ConnectionType } from './types.js';
 import type { SignalClient } from './signalClient.js';
 import type { MediaManager } from './media.js';
 import { store } from './store.js';
+import { showToast } from './ui.js';
 
 const NEGOTIATION_TIMEOUT_MS = 20_000;
 const MAX_ICE_RESTARTS = 3;
@@ -71,12 +72,17 @@ export function startRtcSession(opts: {
   // A share (with audio) may already be live from before this session started.
   syncSenders();
 
-  // Receiver side: the track exists immediately but stays muted until the
-  // peer actually sends audio (their replaceTrack(track) ↔ replaceTrack(null)
-  // flips it), so mute/unmute doubles as "peer's share has audio" presence.
+  // Receiver side: publish the track for the <audio> sink. Volume-control
+  // visibility is driven by the peer's explicit 'screen-audio' app event
+  // (see main.ts) — RTP-driven mute/unmute proved unreliable for that, so
+  // here they only serve as debug-mode probes confirming media actually flows.
   const remoteScreenAudio = screenAudioTransceiver.receiver.track;
-  remoteScreenAudio.onunmute = () => store.set({ remoteScreenAudioActive: true });
-  remoteScreenAudio.onmute   = () => store.set({ remoteScreenAudioActive: false });
+  remoteScreenAudio.onunmute = () => {
+    if (store.get().debugMode) showToast('[debug] screen-audio RTP flowing');
+  };
+  remoteScreenAudio.onmute = () => {
+    if (store.get().debugMode) showToast('[debug] screen-audio RTP stopped');
+  };
   store.set({ remoteScreenAudioTrack: remoteScreenAudio });
 
   const negotiationDeadline = setTimeout(() => {

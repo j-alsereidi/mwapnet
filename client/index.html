@@ -217,14 +217,16 @@
     #screen-pip.hidden { display: none; }
 
     /* ── Peer screen-share audio control ────────────────────────────────
-       Vertical volume slider + mute toggle pinned to the right edge, shown
-       only while the peer's share is actually carrying audio. */
+       Volume slider + mute toggle for the peer's share audio, shown only
+       while their share is actually carrying audio. Horizontal above the
+       toolbar on desktop and mobile-portrait; vertical on the right edge
+       in mobile landscape (where bottom space is scarce). */
     #screen-audio-ctl {
       position: absolute;
-      right: 12px; top: 50%;
-      transform: translateY(-50%);
-      display: flex; flex-direction: column; align-items: center; gap: 6px;
-      padding: 12px 6px 6px;
+      left: 50%; bottom: 92px;
+      transform: translateX(-50%);
+      display: flex; flex-direction: row; align-items: center; gap: 6px;
+      padding: 6px 12px;
       background: rgba(0,0,0,0.5);
       border-radius: 999px;
       backdrop-filter: blur(12px);
@@ -233,11 +235,23 @@
     }
     #screen-audio-ctl.hidden { display: none; }
     #screen-audio-slider {
-      writing-mode: vertical-lr;
-      direction: rtl; /* top = loud, bottom = quiet */
-      height: 110px; width: 22px;
+      width: 140px;
       accent-color: #b8a8c2;
       touch-action: none;
+    }
+    @media (orientation: landscape) {
+      html:not(.has-hover) #screen-audio-ctl {
+        left: auto; right: 12px;
+        top: 50%; bottom: auto;
+        transform: translateY(-50%);
+        flex-direction: column;
+        padding: 12px 6px 6px;
+      }
+      html:not(.has-hover) #screen-audio-slider {
+        writing-mode: vertical-lr;
+        direction: rtl; /* top = loud, bottom = quiet */
+        width: 22px; height: 110px;
+      }
     }
 
     .room-overlay {

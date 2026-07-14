@@ -22,7 +22,12 @@ import type { IceServerConfig, PeerId } from './types.js';
 // "I just turned my camera on") on the same channel. We filter these out
 // before the rtcSession sees them so they don't trip the "unknown shape"
 // warning in ingestSignal.
-type AppEvent = { kind: 'app'; event: 'cam-on' };
+type AppEvent =
+  | { kind: 'app'; event: 'cam-on' }
+  // "My screen share carries audio" — drives the peer's volume-control
+  // visibility deterministically (the remote track's mute/unmute events are
+  // RTP-driven and unreliable for this).
+  | { kind: 'app'; event: 'screen-audio'; on: boolean };
 function isAppEvent(data: unknown): data is AppEvent {
   return !!data && typeof data === 'object' && (data as { kind?: unknown }).kind === 'app';
 }
@@ -251,6 +256,8 @@ function handleServerMessage(msg: import('./types.js').ServerMessage): void {
       store.set({ peerPresence: msg.state });
       playPeerTransitionSound(prev, msg.state);
       reconcileRtc();
+      // A peer who (re)connected or re-entered missed earlier announcements.
+      if (media.getScreenAudioTrack()) announceScreenAudio(true);
       break;
     }
 
@@ -276,11 +283,18 @@ function handleServerMessage(msg: import('./types.js').ServerMessage): void {
       }
       break;
 
-    case 'hangup-all':
-      // Either side asked to end the call for both. Reuse the normal leave
-      // path — state message to the server, leave sound, RTC teardown.
-      if (store.get().phase === 'room') handleLeaveRoom();
+    case 'hangup-all': {
+      // Either side asked to end the call for both. Your own leave sound
+      // always plays for your own actions, but a hangup the OTHER side
+      // initiated respects "mute exit meows" — fully silent when muted.
+      const mine = requestedHangup;
+      requestedHangup = false;
+      if (store.get().phase === 'room') {
+        setMyState('lobby');
+        if (mine || store.get().exitMeowsEnabled) void playSound('roomToLobby');
+      }
       break;
+    }
 
     case 'pong':
       // no-op; just acknowledges our ping
@@ -288,10 +302,12 @@ function handleServerMessage(msg: import('./types.js').ServerMessage): void {
   }
 }
 
-/** Ask the server to end the call for BOTH peers. Not wired to any UI yet —
- *  the server echoes 'hangup-all' back to both sides and each leaves via
- *  handleLeaveRoom(). Callable from the console for testing. */
+/** Ask the server to end the call for BOTH peers (long-press on the leave
+ *  button). The server echoes 'hangup-all' back to both sides; the flag
+ *  lets the echo handler tell "I asked for this" from "the peer did". */
+let requestedHangup = false;
 export function requestGlobalHangup(): void {
+  requestedHangup = true;
   signalClient?.send({ type: 'hangup-all' });
 }
 
@@ -409,6 +425,9 @@ function handleRemoteAppEvent(ev: AppEvent): void {
     // Only play if we're actually in the room — otherwise the chime is
     // disconnected from anything the user is seeing.
     if (store.get().phase === 'room') void playSound('cameraOn');
+  } else if (ev.event === 'screen-audio') {
+    store.set({ remoteScreenAudioActive: ev.on });
+    if (store.get().debugMode) showToast(`[debug] peer screen audio: ${ev.on ? 'on' : 'off'}`);
   }
 }
 
@@ -435,7 +454,15 @@ async function handleScreenShare(): Promise<void> {
   const sharing = store.get().screenSharing;
   try {
     if (sharing) await media.stopScreenShare();
-    else          await media.startScreenShare();
+    else {
+      await media.startScreenShare();
+      // Debug: instantly shows whether the picker actually delivered audio —
+      // window shares never do; Chromium carries audio for tab shares, and
+      // entire-screen shares on Windows only.
+      if (store.get().debugMode && media.isScreenSharing()) {
+        showToast(`[debug] share started — audio ${media.getScreenAudioTrack() ? 'CAPTURED' : 'NOT captured'}`, 5000);
+      }
+    }
   } catch (err) {
     console.warn('[main] screenshare failed:', err);
     // Always say SOMETHING. On Android, NotAllowedError covers both "user
@@ -463,6 +490,17 @@ function pushScreenStateToStore(): void {
   const track = media.getScreenTrack();
   const screenStream = sharing && track ? new MediaStream([track]) : null;
   store.set({ screenSharing: sharing, screenStream });
+  announceScreenAudio();
+}
+
+// Tell the peer whether my share carries audio. Deduplicated, so it's cheap
+// to call from every media change; `force` re-sends for peers who missed it.
+let announcedScreenAudio = false;
+function announceScreenAudio(force = false): void {
+  const on = media.getScreenAudioTrack() !== null;
+  if (!force && on === announcedScreenAudio) return;
+  announcedScreenAudio = on;
+  signalClient?.send({ type: 'signal', data: { kind: 'app', event: 'screen-audio', on } });
 }
 
 function fail(message: string): void {
