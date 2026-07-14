@@ -60,6 +60,7 @@ mountUi({
   // ui.ts render() pushes these straight onto the <audio> element.
   onScreenAudioVolumeChange: (value) => store.set({ screenAudioVolume: value }),
   onScreenAudioMuteToggle: () => store.set({ screenAudioMuted: !store.get().screenAudioMuted }),
+  onGlobalHangup: requestGlobalHangup,
 });
 
 // Unlock the AudioContext and start decoding all sound effects on the very

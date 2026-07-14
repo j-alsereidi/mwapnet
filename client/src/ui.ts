@@ -38,6 +38,7 @@ export interface UiHandlers {
   onTestVineBoom(): void;
   onScreenAudioVolumeChange(value: number): void;
   onScreenAudioMuteToggle(): void;
+  onGlobalHangup(): void;
 }
 
 // DOM refs cached on mount (much faster than getElementById on every render)
@@ -159,7 +160,7 @@ export function mountUi(handlers: UiHandlers): void {
   dom.roomBtnCam.onclick    = handlers.onCamToggle;
   dom.roomBtnScreen.onclick = handlers.onScreenShare;
   dom.roomBtnFlip.onclick   = handlers.onCameraFlip;
-  dom.roomBtnLeave.onclick  = handlers.onLeaveRoom;
+  setupLeaveLongPress(handlers);
   dom.retryBtn.onclick      = handlers.onRetry;
   dom.cameraPicker.onchange = () => handlers.onCameraPick(dom.cameraPicker.value);
 
@@ -276,6 +277,43 @@ export function mountUi(handlers: UiHandlers): void {
 
   store.subscribe(render);
   render(store.get());
+}
+
+// Tap leaves solo; holding LONG_PRESS_MS ends the call for both. Must match
+// the CSS transition duration on #room-btn-leave::before (the fill visual).
+const LONG_PRESS_MS = 1200;
+
+function setupLeaveLongPress(handlers: UiHandlers): void {
+  const btn = dom.roomBtnLeave;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let triggered = false;
+
+  function cancel(): void {
+    if (timer) { clearTimeout(timer); timer = null; }
+    btn.classList.remove('holding');
+  }
+
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); // no synthetic click/focus ring fighting the hold
+    triggered = false;
+    btn.classList.add('holding');
+    timer = setTimeout(() => {
+      triggered = true;
+      btn.classList.remove('holding');
+      btn.classList.add('triggered');
+      setTimeout(() => btn.classList.remove('triggered'), 400);
+      if ('vibrate' in navigator) navigator.vibrate(60);
+      handlers.onGlobalHangup();
+    }, LONG_PRESS_MS);
+  });
+  btn.addEventListener('pointerup', cancel);
+  btn.addEventListener('pointerleave', cancel);
+  btn.addEventListener('pointercancel', cancel);
+  btn.onclick = () => {
+    // A completed hold already acted — swallow the click it also produces.
+    if (triggered) { triggered = false; return; }
+    handlers.onLeaveRoom();
+  };
 }
 
 function setupRoomControlAutoFade(): void {
@@ -512,7 +550,7 @@ function render(s: ClientState): void {
     btn.title = s.camOff ? 'Turn camera on' : 'Turn camera off';
   }
   dom.roomBtnScreen.classList.toggle('active', s.screenSharing);
-  dom.roomBtnFlip.style.display = s.cameras.length >= 2 ? '' : 'none';
+  dom.roomBtnFlip.style.display = s.cameras.length >= 2 && !s.camOff ? '' : 'none';
 
   // Lobby status text — three states per spec
   dom.lobbyStatus.classList.remove('peer-room', 'peer-lobby');

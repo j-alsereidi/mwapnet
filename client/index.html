@@ -339,6 +339,26 @@
     /* Flip-camera button is mobile-only — desktop has the camera picker dropdown */
     html.has-hover #room-btn-flip { display: none; }
 
+    /* ── Leave button: tap leaves solo, ~1.2s hold ends the call for both ──
+       The fill is a growing red disc behind the icon (document order keeps
+       it under the .icon img with no z-index needed); duration must match
+       LONG_PRESS_MS in ui.ts. */
+    #room-btn-leave { position: relative; border-radius: 50%; }
+    #room-btn-leave::before {
+      content: '';
+      position: absolute; inset: 4px;
+      border-radius: 50%;
+      background: rgba(255, 59, 48, 0.9);
+      transform: scale(0);
+      transition: transform 1.2s linear;
+    }
+    #room-btn-leave.holding::before { transform: scale(1); }
+    #room-btn-leave.triggered::before {
+      transition: transform 0.1s ease, opacity 0.3s ease 0.1s;
+      transform: scale(1.15);
+      opacity: 0;
+    }
+
     /* Screenshare is hidden on mobile by default (has-hover is the same
        "real pointer device" signal used above) — Debug Mode is the override,
        toggled via the .debug-mode class on <html> in ui.ts's render(). */
