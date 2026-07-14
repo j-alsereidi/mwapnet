@@ -43,17 +43,41 @@ export function startRtcSession(opts: {
   if (videoTrack) videoSender = pc.addTrack(videoTrack, opts.media.getStream());
   if (audioTrack) audioSender = pc.addTrack(audioTrack, opts.media.getStream());
 
-  const stopMediaListener = opts.media.onChange(() => {
+  // Screen-share audio rides a THIRD slot, pre-allocated here so it's part of
+  // the one initial offer — starting/stopping a share later is replaceTrack
+  // only, never renegotiation. Both sides add their transceivers in the same
+  // order (video, mic, screen audio), so the m-lines pair up deterministically
+  // and this transceiver's receiver is, by construction, the peer's screen
+  // audio — no track-id signaling needed to tell it apart from their voice.
+  const screenAudioTransceiver = pc.addTransceiver('audio');
+
+  const syncSenders = (): void => {
     if (destroyed) return;
     const v = opts.media.getVideoTrack();
     const a = opts.media.getAudioTrack();
+    const sa = opts.media.getScreenAudioTrack();
     if (videoSender && videoSender.track !== v) {
       void videoSender.replaceTrack(v).catch((e) => console.warn('[rtc] video replaceTrack failed:', e));
     }
     if (audioSender && audioSender.track !== a) {
       void audioSender.replaceTrack(a).catch((e) => console.warn('[rtc] audio replaceTrack failed:', e));
     }
-  });
+    if (screenAudioTransceiver.sender.track !== sa) {
+      void screenAudioTransceiver.sender.replaceTrack(sa)
+        .catch((e) => console.warn('[rtc] screen-audio replaceTrack failed:', e));
+    }
+  };
+  const stopMediaListener = opts.media.onChange(syncSenders);
+  // A share (with audio) may already be live from before this session started.
+  syncSenders();
+
+  // Receiver side: the track exists immediately but stays muted until the
+  // peer actually sends audio (their replaceTrack(track) ↔ replaceTrack(null)
+  // flips it), so mute/unmute doubles as "peer's share has audio" presence.
+  const remoteScreenAudio = screenAudioTransceiver.receiver.track;
+  remoteScreenAudio.onunmute = () => store.set({ remoteScreenAudioActive: true });
+  remoteScreenAudio.onmute   = () => store.set({ remoteScreenAudioActive: false });
+  store.set({ remoteScreenAudioTrack: remoteScreenAudio });
 
   const negotiationDeadline = setTimeout(() => {
     if (destroyed || store.get().rtcConnected) return;
@@ -178,7 +202,10 @@ export function startRtcSession(opts: {
     if (disconnectTimer) clearTimeout(disconnectTimer);
     stopMediaListener();
     try { pc.close(); } catch { /* already closed */ }
-    store.set({ remoteStream: null, rtcConnected: false, connectionType: 'unknown' });
+    store.set({
+      remoteStream: null, rtcConnected: false, connectionType: 'unknown',
+      remoteScreenAudioTrack: null, remoteScreenAudioActive: false,
+    });
   }
 
   return { destroy, ingestSignal: (data) => { void ingestSignal(data); } };

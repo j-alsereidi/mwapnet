@@ -56,6 +56,10 @@ mountUi({
   onVineBoomVolumeChange: handleVineBoomVolumeChange,
   onTestSfx: playRandomSfx,
   onTestVineBoom: playVineBoomTest,
+  // Listener-side controls for the PEER's screen-share audio. Session-only —
+  // ui.ts render() pushes these straight onto the <audio> element.
+  onScreenAudioVolumeChange: (value) => store.set({ screenAudioVolume: value }),
+  onScreenAudioMuteToggle: () => store.set({ screenAudioMuted: !store.get().screenAudioMuted }),
 });
 
 // Unlock the AudioContext and start decoding all sound effects on the very
@@ -271,10 +275,23 @@ function handleServerMessage(msg: import('./types.js').ServerMessage): void {
       }
       break;
 
+    case 'hangup-all':
+      // Either side asked to end the call for both. Reuse the normal leave
+      // path — state message to the server, leave sound, RTC teardown.
+      if (store.get().phase === 'room') handleLeaveRoom();
+      break;
+
     case 'pong':
       // no-op; just acknowledges our ping
       break;
   }
+}
+
+/** Ask the server to end the call for BOTH peers. Not wired to any UI yet —
+ *  the server echoes 'hangup-all' back to both sides and each leaves via
+ *  handleLeaveRoom(). Callable from the console for testing. */
+export function requestGlobalHangup(): void {
+  signalClient?.send({ type: 'hangup-all' });
 }
 
 // ── Presence transition sounds ───────────────────────────────────────────────

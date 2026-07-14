@@ -36,6 +36,8 @@ export interface UiHandlers {
   onVineBoomVolumeChange(value: number): void;
   onTestSfx():      void;
   onTestVineBoom(): void;
+  onScreenAudioVolumeChange(value: number): void;
+  onScreenAudioMuteToggle(): void;
 }
 
 // DOM refs cached on mount (much faster than getElementById on every render)
@@ -62,6 +64,10 @@ interface Dom {
   retryBtn:      HTMLButtonElement;
   unmuteOverlay: HTMLElement;
   controls:      HTMLElement;
+  screenAudio:       HTMLAudioElement;
+  screenAudioCtl:    HTMLElement;
+  screenAudioSlider: HTMLInputElement;
+  screenAudioMute:   HTMLButtonElement;
   settingsBtn:      HTMLButtonElement;
   settingsMenu:     HTMLElement;
   settingsHideSelf: HTMLButtonElement;
@@ -118,6 +124,10 @@ export function mountUi(handlers: UiHandlers): void {
     retryBtn:      document.getElementById('retry-btn') as HTMLButtonElement,
     unmuteOverlay: document.getElementById('unmute-overlay')!,
     controls:      document.querySelector('#screen-room .controls') as HTMLElement,
+    screenAudio:       document.getElementById('screen-audio')        as HTMLAudioElement,
+    screenAudioCtl:    document.getElementById('screen-audio-ctl')!,
+    screenAudioSlider: document.getElementById('screen-audio-slider') as HTMLInputElement,
+    screenAudioMute:   document.getElementById('screen-audio-mute')   as HTMLButtonElement,
     settingsBtn:      document.getElementById('settings-btn')        as HTMLButtonElement,
     settingsMenu:     document.getElementById('settings-menu')!,
     settingsHideSelf: document.getElementById('settings-hide-self')  as HTMLButtonElement,
@@ -204,6 +214,8 @@ export function mountUi(handlers: UiHandlers): void {
   dom.vineBoomTestBtn.onclick = () => handlers.onTestVineBoom();
   dom.sfxVolumeSlider.oninput      = () => handlers.onSfxVolumeChange(Number(dom.sfxVolumeSlider.value));
   dom.vineBoomVolumeSlider.oninput = () => handlers.onVineBoomVolumeChange(Number(dom.vineBoomVolumeSlider.value));
+  dom.screenAudioSlider.oninput = () => handlers.onScreenAudioVolumeChange(Number(dom.screenAudioSlider.value));
+  dom.screenAudioMute.onclick   = () => handlers.onScreenAudioMuteToggle();
   dom.settingsPageKeySave.onclick = () => {
     const newKey = dom.settingsPageKeyInput.value.trim();
     if (!newKey) return;
@@ -254,10 +266,12 @@ export function mountUi(handlers: UiHandlers): void {
   dom.lobbySettingsBtn.innerHTML  = `${iconHtml(ICONS.settings)}<span>Settings</span>`;
   dom.sfxMuteBtn.innerHTML      = iconHtml(ICONS.mutedSpeaker);
   dom.vineBoomMuteBtn.innerHTML = iconHtml(ICONS.mutedSpeaker);
+  dom.screenAudioMute.innerHTML = iconHtml(ICONS.mutedSpeaker);
 
   setupRoomControlAutoFade();
-  setupLocalPipDrag();
+  setupPipDrag(dom.localVideo);
   setupPipDrag(dom.screenPip);
+  setupRemoteZoom(dom.remoteVideo);
   setupLocalAspectSync();
 
   store.subscribe(render);
@@ -291,31 +305,143 @@ function setupLocalAspectSync(): void {
   v.addEventListener('resize', sync);
 }
 
-function setupLocalPipDrag(): void {
-  setupPipDrag(dom.localVideo);
-}
-
+// PiPs: one pointer drags the tile around; a second pointer pinch-resizes it
+// (width only — height follows the element's aspect-ratio). Ctrl+scroll
+// resizes on desktop. Resizing the box IS the zoom for a PiP — "zooming into"
+// a 144px tile is useless, making it bigger is what you actually want.
 function setupPipDrag(v: HTMLVideoElement): void {
-  let dragging = false;
+  const pointers = new Map<number, { x: number; y: number }>();
   let offX = 0, offY = 0;
-  v.addEventListener('pointerdown', (e) => {
-    dragging = true;
-    v.setPointerCapture(e.pointerId);
+  let pinchDist = 0;
+
+  function setWidth(px: number): void {
+    const w = Math.max(90, Math.min(window.innerWidth * 0.8, px));
+    v.style.width = `${w}px`;
+  }
+  function anchorDrag(x: number, y: number): void {
     const r = v.getBoundingClientRect();
-    offX = e.clientX - r.left;
-    offY = e.clientY - r.top;
+    offX = x - r.left;
+    offY = y - r.top;
+  }
+
+  v.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault(); // don't let the browser page-zoom
+    setWidth(v.offsetWidth * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+  }, { passive: false });
+
+  v.addEventListener('pointerdown', (e) => {
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    v.setPointerCapture(e.pointerId);
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+    } else {
+      anchorDrag(e.clientX, e.clientY);
+    }
     e.preventDefault();
   });
-  document.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
-    const x = Math.max(0, Math.min(e.clientX - offX, window.innerWidth  - v.offsetWidth));
-    const y = Math.max(0, Math.min(e.clientY - offY, window.innerHeight - v.offsetHeight));
-    v.style.left   = `${x}px`;
-    v.style.top    = `${y}px`;
-    v.style.right  = 'auto';
-    v.style.bottom = 'auto';
+  v.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pinchDist > 0) setWidth(v.offsetWidth * (d / pinchDist));
+      pinchDist = d;
+    } else if (pointers.size === 1) {
+      const x = Math.max(0, Math.min(e.clientX - offX, window.innerWidth  - v.offsetWidth));
+      const y = Math.max(0, Math.min(e.clientY - offY, window.innerHeight - v.offsetHeight));
+      v.style.left   = `${x}px`;
+      v.style.top    = `${y}px`;
+      v.style.right  = 'auto';
+      v.style.bottom = 'auto';
+    }
   });
-  document.addEventListener('pointerup', () => { dragging = false; });
+  const release = (e: PointerEvent): void => {
+    pointers.delete(e.pointerId);
+    pinchDist = 0;
+    // Pinch ended with one finger still down: re-anchor so the resumed drag
+    // doesn't jump the tile to the stale first-finger offset.
+    const rest = [...pointers.values()][0];
+    if (pointers.size === 1 && rest) anchorDrag(rest.x, rest.y);
+  };
+  v.addEventListener('pointerup', release);
+  v.addEventListener('pointercancel', release);
+}
+
+// Remote feed: pinch / ctrl+scroll zooms into the CONTENT (it's already
+// fullscreen — there's no box to grow), one-finger or mouse drag pans while
+// zoomed, double-click/double-tap resets to 1:1.
+function setupRemoteZoom(v: HTMLVideoElement): void {
+  let scale = 1, tx = 0, ty = 0;
+  const pointers = new Map<number, { x: number; y: number }>();
+  let pinchDist = 0;
+  let panning = false, panOriginX = 0, panOriginY = 0;
+
+  function apply(): void {
+    // translate() sits outside scale() so tx/ty are plain screen px; clamp
+    // to the overflow each side so the video always covers the box.
+    const maxX = ((scale - 1) * v.clientWidth) / 2;
+    const maxY = ((scale - 1) * v.clientHeight) / 2;
+    tx = Math.max(-maxX, Math.min(maxX, tx));
+    ty = Math.max(-maxY, Math.min(maxY, ty));
+    v.style.transform = scale > 1 ? `translate(${tx}px, ${ty}px) scale(${scale})` : '';
+  }
+  function setScale(next: number): void {
+    scale = Math.max(1, Math.min(6, next));
+    apply();
+  }
+
+  v.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    setScale(scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
+  }, { passive: false });
+
+  v.addEventListener('pointerdown', (e) => {
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    v.setPointerCapture(e.pointerId);
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+      panning = false;
+    } else if (scale > 1) {
+      panning = true;
+      panOriginX = e.clientX - tx;
+      panOriginY = e.clientY - ty;
+    }
+  });
+  v.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pinchDist > 0) setScale(scale * (d / pinchDist));
+      pinchDist = d;
+    } else if (panning) {
+      tx = e.clientX - panOriginX;
+      ty = e.clientY - panOriginY;
+      apply();
+    }
+  });
+  const release = (e: PointerEvent): void => {
+    pointers.delete(e.pointerId);
+    pinchDist = 0;
+    const rest = [...pointers.values()][0];
+    if (pointers.size === 1 && rest && scale > 1) {
+      // Pinch ended with a finger down — hand off smoothly into panning.
+      panning = true;
+      panOriginX = rest.x - tx;
+      panOriginY = rest.y - ty;
+    } else {
+      panning = false;
+    }
+  };
+  v.addEventListener('pointerup', release);
+  v.addEventListener('pointercancel', release);
+  v.addEventListener('dblclick', () => { scale = 1; tx = ty = 0; apply(); });
 }
 
 // Track the last attached stream so we don't redundantly rewrite srcObject.
@@ -326,6 +452,7 @@ function setupPipDrag(v: HTMLVideoElement): void {
 let lastLocalStreamId: string | null = null;
 let lastLocalVideoTrackId: string | null = null;
 let lastRemoteStreamId: string | null = null;
+let lastScreenAudioTrack: MediaStreamTrack | null = null;
 let lastLocalHidden = false;
 let lastPeerPresence: PeerPresence | null = null;
 let lastPhase: ClientState['phase'] | null = null;
@@ -438,6 +565,26 @@ function render(s: ClientState): void {
   // nothing in the camera-side logic (track-id tracking, srcObject swaps,
   // hide class on #local) can interfere with screenshare display.
   renderScreenPip(s);
+
+  // ── Peer's screen-share audio ─────────────────────────────────────────
+  // Dedicated <audio> sink (separate from #remote, which carries their
+  // voice) so this volume/mute only ever touches the share's audio.
+  if (s.remoteScreenAudioTrack !== lastScreenAudioTrack) {
+    dom.screenAudio.srcObject =
+      s.remoteScreenAudioTrack ? new MediaStream([s.remoteScreenAudioTrack]) : null;
+    lastScreenAudioTrack = s.remoteScreenAudioTrack;
+  }
+  dom.screenAudio.volume = s.screenAudioVolume / 100;
+  dom.screenAudio.muted = s.screenAudioMuted;
+  const showScreenAudioCtl = s.phase === 'room' && s.remoteScreenAudioActive;
+  dom.screenAudioCtl.classList.toggle('hidden', !showScreenAudioCtl);
+  if (showScreenAudioCtl && dom.screenAudio.paused) {
+    void dom.screenAudio.play().catch(() => { /* unmute overlay path covers voice; share audio retries next render */ });
+  }
+  if (Number(dom.screenAudioSlider.value) !== s.screenAudioVolume) {
+    dom.screenAudioSlider.value = String(s.screenAudioVolume);
+  }
+  dom.screenAudioMute.classList.toggle('on', s.screenAudioMuted);
 
   // Settings checkbox state
   dom.settingsHideSelf.classList.toggle('on', s.hideSelfView);

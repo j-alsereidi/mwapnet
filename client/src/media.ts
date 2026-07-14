@@ -16,6 +16,7 @@ export class MediaManager {
   private cameraTrack: MediaStreamTrack | null = null;
   private audioTrack: MediaStreamTrack | null = null;
   private screenTrack: MediaStreamTrack | null = null;
+  private screenAudioTrack: MediaStreamTrack | null = null;
   private currentCameraId: string | null = null;
   private listeners = new Set<ChangeListener>();
 
@@ -38,6 +39,10 @@ export class MediaManager {
 
   getScreenTrack(): MediaStreamTrack | null {
     return this.screenTrack;
+  }
+
+  getScreenAudioTrack(): MediaStreamTrack | null {
+    return this.screenAudioTrack;
   }
 
   currentCamera(): string | null {
@@ -97,11 +102,18 @@ export class MediaManager {
    *  via the track's onended event. */
   async startScreenShare(): Promise<void> {
     if (this.screenTrack) return;
-    const display = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    // audio: true adds a "share audio" checkbox to the browser's picker.
+    // Chromium delivers audio for tab shares (all platforms) and full-screen
+    // shares (Windows only — which covers the desktop app's WebView2);
+    // window shares never carry audio. No track when unchecked/unsupported.
+    const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
     const track = display.getVideoTracks()[0];
     if (!track) return;
     track.addEventListener('ended', () => { void this.stopScreenShare(); });
     this.screenTrack = track;
+    // Kept OUT of this.stream — it rides its own RTP slot (see rtcSession),
+    // and local preview elements must never play your own screen audio back.
+    this.screenAudioTrack = display.getAudioTracks()[0] ?? null;
     this.rebuildStream();
     this.emit();
   }
@@ -110,6 +122,8 @@ export class MediaManager {
     if (!this.screenTrack) return;
     this.screenTrack.stop();
     this.screenTrack = null;
+    this.screenAudioTrack?.stop();
+    this.screenAudioTrack = null;
     this.rebuildStream();
     this.emit();
   }
@@ -126,7 +140,8 @@ export class MediaManager {
     this.cameraTrack?.stop();
     this.audioTrack?.stop();
     this.screenTrack?.stop();
-    this.cameraTrack = this.audioTrack = this.screenTrack = null;
+    this.screenAudioTrack?.stop();
+    this.cameraTrack = this.audioTrack = this.screenTrack = this.screenAudioTrack = null;
     this.listeners.clear();
   }
 

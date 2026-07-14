@@ -34,6 +34,15 @@ export interface ClientState {
   camOff: boolean;
   screenSharing: boolean;
 
+  // The PEER's screen-share audio (set by rtcSession from its dedicated
+  // transceiver). `Active` mirrors the track's unmute/mute — i.e. whether
+  // their share actually carries audio right now. Volume/mute are local,
+  // session-only listener controls; they never affect the peer's voice.
+  remoteScreenAudioTrack: MediaStreamTrack | null;
+  remoteScreenAudioActive: boolean;
+  screenAudioVolume: number; // 0-100
+  screenAudioMuted: boolean;
+
   cameras: CameraOption[];
   currentCameraId: string | null;
 
@@ -63,6 +72,9 @@ export type ServerMessage =
   | { type: 'hello'; you: PeerId; peerPresence: PeerPresence }
   | { type: 'peer-state'; state: PeerPresence }
   | { type: 'signal'; data: unknown }
+  // Either peer asked to end the call for BOTH sides; the server echoes this
+  // to both sockets and each client walks itself back to the lobby.
+  | { type: 'hangup-all' }
   | { type: 'pong'; nonce: number }
   | { type: 'error'; code: string; message: string };
 
@@ -70,4 +82,5 @@ export type ServerMessage =
 export type ClientMessage =
   | { type: 'state'; state: 'lobby' | 'room' }
   | { type: 'signal'; data: unknown }
+  | { type: 'hangup-all' }
   | { type: 'ping'; nonce: number };

@@ -13,6 +13,11 @@ const initialState: ClientState = {
   camOff: false,
   screenSharing: false,
 
+  remoteScreenAudioTrack: null,
+  remoteScreenAudioActive: false,
+  screenAudioVolume: 100,
+  screenAudioMuted: false,
+
   cameras: [],
   currentCameraId: null,
 

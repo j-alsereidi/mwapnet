@@ -159,6 +159,15 @@ export function mountSignal(server: Server): void {
           if (other) sendJson(other, msg);
           break;
         }
+        case 'hangup-all': {
+          // Echo to BOTH sides (requester included) so one client code path
+          // handles the transition regardless of who asked.
+          console.log(`[signal] ${peerId} requested hangup-all`);
+          sendJson(ws, { type: 'hangup-all' });
+          const other = otherSocket(peerId);
+          if (other) sendJson(other, { type: 'hangup-all' });
+          break;
+        }
         case 'ping': {
           sendJson(ws, { type: 'pong', nonce: msg.nonce });
           break;

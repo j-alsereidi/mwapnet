@@ -7,6 +7,9 @@ const MAX_MESSAGE_BYTES = 16 * 1024;
 export const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('state'), state: z.enum(['lobby', 'room']) }),
   z.object({ type: z.literal('signal'), data: z.unknown() }),
+  // "End the call for both of us" — echoed to both peers, who each walk
+  // themselves back to the lobby through their normal leave path.
+  z.object({ type: z.literal('hangup-all') }),
   z.object({ type: z.literal('ping'), nonce: z.number() }),
 ]);
 
