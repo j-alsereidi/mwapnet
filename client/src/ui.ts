@@ -317,10 +317,14 @@ function setupLeaveLongPress(handlers: UiHandlers): void {
 }
 
 function setupRoomControlAutoFade(): void {
+  // The screen-audio volume bar fades in lockstep with the toolbar.
+  const els = (): HTMLElement[] => [dom.controls, dom.screenAudioCtl];
   function reveal(): void {
-    dom.controls.style.opacity = '1';
+    for (const el of els()) el.style.opacity = '1';
     if (controlsFadeTimer) clearTimeout(controlsFadeTimer);
-    controlsFadeTimer = setTimeout(() => { dom.controls.style.opacity = '0'; }, 3000);
+    controlsFadeTimer = setTimeout(() => {
+      for (const el of els()) el.style.opacity = '0';
+    }, 3000);
   }
   document.addEventListener('pointermove', reveal);
   document.addEventListener('pointerdown', reveal);

@@ -44,13 +44,17 @@ export function startRtcSession(opts: {
   if (videoTrack) videoSender = pc.addTrack(videoTrack, opts.media.getStream());
   if (audioTrack) audioSender = pc.addTrack(audioTrack, opts.media.getStream());
 
-  // Screen-share audio rides a THIRD slot, pre-allocated here so it's part of
-  // the one initial offer — starting/stopping a share later is replaceTrack
-  // only, never renegotiation. Both sides add their transceivers in the same
-  // order (video, mic, screen audio), so the m-lines pair up deterministically
-  // and this transceiver's receiver is, by construction, the peer's screen
-  // audio — no track-id signaling needed to tell it apart from their voice.
-  const screenAudioTransceiver = pc.addTransceiver('audio');
+  // Screen-share audio rides a THIRD slot, negotiated once in the initial
+  // offer — starting/stopping a share later is replaceTrack only, never
+  // renegotiation. ONLY the initiator pre-allocates it: per spec, an incoming
+  // m-line associates exclusively with transceivers created by addTrack, so a
+  // pre-added addTransceiver on the answerer is left orphaned (never sends,
+  // its receiver never fires) while setRemoteDescription spawns a hidden
+  // recvonly duplicate that actually owns the m-line. The answerer instead
+  // ADOPTS that spawned transceiver after the offer arrives (see adopt below)
+  // and upgrades it to sendrecv before answering.
+  let screenAudioTransceiver: RTCRtpTransceiver | null =
+    opts.initiator ? pc.addTransceiver('audio') : null;
 
   const syncSenders = (): void => {
     if (destroyed) return;
@@ -63,27 +67,48 @@ export function startRtcSession(opts: {
     if (audioSender && audioSender.track !== a) {
       void audioSender.replaceTrack(a).catch((e) => console.warn('[rtc] audio replaceTrack failed:', e));
     }
-    if (screenAudioTransceiver.sender.track !== sa) {
+    if (screenAudioTransceiver && screenAudioTransceiver.sender.track !== sa) {
       void screenAudioTransceiver.sender.replaceTrack(sa)
         .catch((e) => console.warn('[rtc] screen-audio replaceTrack failed:', e));
     }
   };
   const stopMediaListener = opts.media.onChange(syncSenders);
-  // A share (with audio) may already be live from before this session started.
-  syncSenders();
 
   // Receiver side: publish the track for the <audio> sink. Volume-control
   // visibility is driven by the peer's explicit 'screen-audio' app event
-  // (see main.ts) — RTP-driven mute/unmute proved unreliable for that, so
-  // here they only serve as debug-mode probes confirming media actually flows.
-  const remoteScreenAudio = screenAudioTransceiver.receiver.track;
-  remoteScreenAudio.onunmute = () => {
-    if (store.get().debugMode) showToast('[debug] screen-audio RTP flowing');
-  };
-  remoteScreenAudio.onmute = () => {
-    if (store.get().debugMode) showToast('[debug] screen-audio RTP stopped');
-  };
-  store.set({ remoteScreenAudioTrack: remoteScreenAudio });
+  // (see main.ts); the RTP-driven mute/unmute events here are debug-mode
+  // probes confirming media actually flows.
+  function wireScreenAudio(t: RTCRtpTransceiver): void {
+    const remoteScreenAudio = t.receiver.track;
+    remoteScreenAudio.onunmute = () => {
+      if (store.get().debugMode) showToast('[debug] screen-audio RTP flowing');
+    };
+    remoteScreenAudio.onmute = () => {
+      if (store.get().debugMode) showToast('[debug] screen-audio RTP stopped');
+    };
+    store.set({ remoteScreenAudioTrack: remoteScreenAudio });
+  }
+  if (screenAudioTransceiver) wireScreenAudio(screenAudioTransceiver);
+  // A share (with audio) may already be live from before this session started.
+  syncSenders();
+
+  // Answerer half of the screen-audio slot: adopt the transceiver that
+  // setRemoteDescription(offer) just created for the third m-line. It's the
+  // audio transceiver that isn't the mic's. Runs before createAnswer so the
+  // sendrecv upgrade (Chrome spawns it recvonly) lands in the answer.
+  function adoptScreenAudioTransceiver(): void {
+    if (screenAudioTransceiver) return; // initiator, or already adopted
+    screenAudioTransceiver = pc.getTransceivers().find(
+      (t) => t.receiver.track.kind === 'audio' && t.sender !== audioSender
+    ) ?? null;
+    if (!screenAudioTransceiver) {
+      console.warn('[rtc] screen-audio transceiver missing from offer');
+      return;
+    }
+    screenAudioTransceiver.direction = 'sendrecv';
+    wireScreenAudio(screenAudioTransceiver);
+    syncSenders();
+  }
 
   const negotiationDeadline = setTimeout(() => {
     if (destroyed || store.get().rtcConnected) return;
@@ -161,6 +186,7 @@ export function startRtcSession(opts: {
           try { await pc.addIceCandidate(c); } catch (e) { console.warn('[rtc] queued ICE add failed:', e); }
         }
         if (msg.type === 'offer') {
+          adoptScreenAudioTransceiver(); // before createAnswer — see above
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           console.log('[rtc] signal OUT: answer');
