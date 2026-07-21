@@ -561,6 +561,28 @@
     .settings-page .primary-btn { margin-top: 4px; }
     #settings-page-server-url-row.hidden { display: none; }
 
+    /* Desktop mic picker + level meter */
+    #mic-input-row.hidden { display: none; }
+    .mic-select {
+      flex: 1 1 auto; min-width: 0;
+      padding: 8px 10px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 8px;
+      color: #fff; font-family: inherit; font-size: 13px;
+    }
+    .mic-meter {
+      height: 8px; margin: 4px 0 2px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      overflow: hidden;
+    }
+    .mic-meter-fill {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, #6ad46a, #e6d24a 70%, #e05a4a);
+      transition: width 0.06s linear;
+    }
+
     /* Self-PiP visibility — JS toggles .hidden in the room when there's no
        outgoing video (cam off + not screensharing) or the user opted to hide it. */
     #local.hidden { display: none; }
@@ -722,6 +744,16 @@
     <div class="settings-page-body">
       <section class="settings-section">
         <h3>Audio</h3>
+        <!-- Desktop only: choose the mic feeding the call, with a live level
+             meter. Revealed by openSettingsPage() when __PLATFORM__==='tauri'. -->
+        <div id="mic-input-row" class="hidden">
+          <div class="settings-label">Microphone</div>
+          <div class="settings-row">
+            <select id="mic-input-select" class="mic-select"></select>
+            <button class="test-btn" id="mic-test-btn">Test</button>
+          </div>
+          <div class="mic-meter"><div class="mic-meter-fill" id="mic-meter-fill"></div></div>
+        </div>
         <div class="settings-row">
           <span class="settings-row-label">SFX Volume</span>
           <input type="range" id="sfx-volume-slider" class="volume-slider" min="0" max="100" value="100" />

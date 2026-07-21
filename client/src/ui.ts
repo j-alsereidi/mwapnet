@@ -2,6 +2,7 @@ import { store } from './store.js';
 import type { ClientState, PeerPresence } from './types.js';
 import { ICONS, iconHtml } from './icons.js';
 import { pairKeyStore, serverUrlKeyStore } from '@keystore';
+import { startMicMeter } from './micMeter.js';
 
 // Detect a "real" pointer device (mouse / trackpad) so we can scope :hover
 // styles to it. Pure CSS `@media (hover: hover)` is unreliable — some
@@ -39,6 +40,7 @@ export interface UiHandlers {
   onScreenAudioVolumeChange(value: number): void;
   onScreenAudioMuteToggle(): void;
   onGlobalHangup(): void;
+  onMicPick(deviceId: string): void;
 }
 
 // DOM refs cached on mount (much faster than getElementById on every render)
@@ -90,10 +92,18 @@ interface Dom {
   settingsPageServerUrlInput: HTMLInputElement;
   settingsPageKeySave:        HTMLButtonElement;
   settingsPageDebugMode:      HTMLButtonElement;
+  micInputRow:    HTMLElement;
+  micInputSelect: HTMLSelectElement;
+  micTestBtn:     HTMLButtonElement;
+  micMeterFill:   HTMLElement;
 }
 
 let dom: Dom;
 let controlsFadeTimer: ReturnType<typeof setTimeout> | null = null;
+// Mic-test meter: the teardown fn while active, plus a generation counter that
+// invalidates an in-flight startMicMeter() if the user stops/switches first.
+let micMeterStop: (() => void) | null = null;
+let micMeterGen = 0;
 
 export function mountUi(handlers: UiHandlers): void {
   dom = {
@@ -150,6 +160,10 @@ export function mountUi(handlers: UiHandlers): void {
     settingsPageServerUrlInput: document.getElementById('settings-page-server-url-input') as HTMLInputElement,
     settingsPageKeySave:        document.getElementById('settings-page-key-save')  as HTMLButtonElement,
     settingsPageDebugMode:      document.getElementById('settings-page-debug-mode') as HTMLButtonElement,
+    micInputRow:    document.getElementById('mic-input-row')!,
+    micInputSelect: document.getElementById('mic-input-select') as HTMLSelectElement,
+    micTestBtn:     document.getElementById('mic-test-btn')     as HTMLButtonElement,
+    micMeterFill:   document.getElementById('mic-meter-fill')!,
   };
 
   // Wire handlers
@@ -230,6 +244,16 @@ export function mountUi(handlers: UiHandlers): void {
     })();
   };
 
+  // Desktop mic picker + test. onMicPick switches the call mic; the Test
+  // button toggles a live level meter (independent capture — see micMeter.ts).
+  dom.micInputSelect.onchange = () => {
+    handlers.onMicPick(dom.micInputSelect.value);
+    if (micMeterStop) startMicTest(); // re-point the running meter at the new device
+  };
+  dom.micTestBtn.onclick = () => {
+    if (micMeterStop) stopMicTest(); else startMicTest();
+  };
+
   function openSettingsPage(): void {
     dom.settingsPage.classList.remove('hidden');
     void pairKeyStore.get().then((v) => { dom.settingsPageKeyInput.value = v ?? ''; });
@@ -239,9 +263,49 @@ export function mountUi(handlers: UiHandlers): void {
         dom.settingsPageServerUrlInput.value = v ?? __SERVER_BASE_URL_DEFAULT__;
       });
     }
+    if (__PLATFORM__ === 'tauri') {
+      dom.micInputRow.classList.remove('hidden');
+      void populateMicList();
+    }
   }
   function closeSettingsPage(): void {
     dom.settingsPage.classList.add('hidden');
+    stopMicTest(); // don't leave the meter (rAF + capture + AudioContext) running
+  }
+
+  async function populateMicList(): Promise<void> {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const mics = devices.filter((d) => d.kind === 'audioinput');
+    const active = store.get().localStream?.getAudioTracks()[0]?.getSettings().deviceId ?? '';
+    dom.micInputSelect.innerHTML = '';
+    for (const m of mics) {
+      const opt = document.createElement('option');
+      opt.value = m.deviceId;
+      opt.textContent = m.label || 'Microphone';
+      dom.micInputSelect.appendChild(opt);
+    }
+    if (active) dom.micInputSelect.value = active;
+  }
+
+  function startMicTest(): void {
+    stopMicTest();
+    dom.micTestBtn.textContent = 'Stop';
+    const gen = ++micMeterGen; // stale-start guard: closing before getUserMedia resolves
+    void startMicMeter(dom.micInputSelect.value || undefined, (level) => {
+      dom.micMeterFill.style.width = `${Math.round(level * 100)}%`;
+    }).then((stop) => {
+      if (gen !== micMeterGen) { stop(); return; } // superseded/closed while starting
+      micMeterStop = stop;
+    }).catch((err) => {
+      console.warn('[mic-test] failed:', err);
+      dom.micTestBtn.textContent = 'Test';
+    });
+  }
+  function stopMicTest(): void {
+    micMeterGen++;
+    if (micMeterStop) { micMeterStop(); micMeterStop = null; }
+    dom.micTestBtn.textContent = 'Test';
+    dom.micMeterFill.style.width = '0%';
   }
 
   // Screen-share button is always shown. Android Chrome supports

@@ -18,6 +18,7 @@ export class MediaManager {
   private screenTrack: MediaStreamTrack | null = null;
   private screenAudioTrack: MediaStreamTrack | null = null;
   private currentCameraId: string | null = null;
+  private currentMicId: string | null = null;
   private listeners = new Set<ChangeListener>();
 
   getStream(): MediaStream {
@@ -64,6 +65,7 @@ export class MediaManager {
     this.cameraTrack = media.getVideoTracks()[0] ?? null;
     this.audioTrack  = media.getAudioTracks()[0] ?? null;
     this.currentCameraId = this.cameraTrack?.getSettings().deviceId ?? null;
+    this.currentMicId    = this.audioTrack?.getSettings().deviceId ?? null;
     this.rebuildStream();
     this.emit();
   }
@@ -74,6 +76,25 @@ export class MediaManager {
     return devices
       .filter(d => d.kind === 'videoinput')
       .map(d => ({ deviceId: d.deviceId, label: d.label || 'Camera' }));
+  }
+
+  /** Switch the mic feeding the call. Mirrors switchCamera: stop the old
+   *  track first, then acquire the new one, then emit so the RTP sender's
+   *  replaceTrack picks it up. Mute state is re-applied by the caller. */
+  async switchMicrophone(deviceId: string): Promise<void> {
+    if (deviceId === this.currentMicId) return;
+    this.audioTrack?.stop();
+    this.audioTrack = null;
+    const next = await navigator.mediaDevices.getUserMedia({
+      audio: { deviceId: { exact: deviceId } },
+      video: false,
+    });
+    const newTrack = next.getAudioTracks()[0];
+    if (!newTrack) return;
+    this.audioTrack = newTrack;
+    this.currentMicId = deviceId;
+    this.rebuildStream();
+    this.emit();
   }
 
   /** Switch to a different camera. If screensharing, the switch still happens

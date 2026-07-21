@@ -66,6 +66,7 @@ mountUi({
   onScreenAudioVolumeChange: (value) => store.set({ screenAudioVolume: value }),
   onScreenAudioMuteToggle: () => store.set({ screenAudioMuted: !store.get().screenAudioMuted }),
   onGlobalHangup: requestGlobalHangup,
+  onMicPick: (deviceId) => { void handleMicPick(deviceId); },
 });
 
 // Unlock the AudioContext and start decoding all sound effects on the very
@@ -439,6 +440,16 @@ async function handleCameraPick(deviceId: string): Promise<void> {
     media.setCamOff(store.get().camOff);
   } catch (err) {
     console.warn('[main] switchCamera failed:', err);
+  }
+}
+
+async function handleMicPick(deviceId: string): Promise<void> {
+  try {
+    await media.switchMicrophone(deviceId);
+    // Re-apply mute state to the fresh track (a new track defaults to enabled).
+    media.setMicMuted(store.get().micMuted);
+  } catch (err) {
+    console.warn('[main] switchMicrophone failed:', err);
   }
 }
 
