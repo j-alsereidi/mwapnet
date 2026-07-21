@@ -18,6 +18,9 @@ const initialState: ClientState = {
   screenAudioVolume: 100,
   screenAudioMuted: false,
 
+  remoteExtraCameraTrack: null,
+  remoteScreenCamActive: false,
+
   cameras: [],
   currentCameraId: null,
 

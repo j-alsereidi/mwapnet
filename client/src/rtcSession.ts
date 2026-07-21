@@ -44,15 +44,23 @@ export function startRtcSession(opts: {
   if (videoTrack) videoSender = pc.addTrack(videoTrack, opts.media.getStream());
   if (audioTrack) audioSender = pc.addTrack(audioTrack, opts.media.getStream());
 
-  // Screen-share audio rides a THIRD slot, negotiated once in the initial
-  // offer — starting/stopping a share later is replaceTrack only, never
-  // renegotiation. ONLY the initiator pre-allocates it: per spec, an incoming
-  // m-line associates exclusively with transceivers created by addTrack, so a
+  // While screen-sharing, the camera keeps flowing on its OWN video slot so
+  // the peer sees screen + camera at once (getVideoTrack puts the screen on
+  // the main sender; getExtraCameraTrack puts the camera here). Screen audio
+  // rides a fourth slot. Both extra slots are negotiated once in the initial
+  // offer so start/stop is replaceTrack only, never renegotiation.
+  //
+  // ONLY the initiator pre-allocates them: per spec, an incoming m-line
+  // associates exclusively with transceivers created by addTrack, so a
   // pre-added addTransceiver on the answerer is left orphaned (never sends,
   // its receiver never fires) while setRemoteDescription spawns a hidden
   // recvonly duplicate that actually owns the m-line. The answerer instead
-  // ADOPTS that spawned transceiver after the offer arrives (see adopt below)
-  // and upgrades it to sendrecv before answering.
+  // ADOPTS those spawned transceivers when the offer arrives (see adopt
+  // below) and upgrades them to sendrecv before answering. The two extra
+  // transceivers are added video-then-audio on BOTH sides so the m-lines
+  // pair up deterministically.
+  let extraCamTransceiver: RTCRtpTransceiver | null =
+    opts.initiator ? pc.addTransceiver('video') : null;
   let screenAudioTransceiver: RTCRtpTransceiver | null =
     opts.initiator ? pc.addTransceiver('audio') : null;
 
@@ -60,12 +68,17 @@ export function startRtcSession(opts: {
     if (destroyed) return;
     const v = opts.media.getVideoTrack();
     const a = opts.media.getAudioTrack();
+    const ec = opts.media.getExtraCameraTrack();
     const sa = opts.media.getScreenAudioTrack();
     if (videoSender && videoSender.track !== v) {
       void videoSender.replaceTrack(v).catch((e) => console.warn('[rtc] video replaceTrack failed:', e));
     }
     if (audioSender && audioSender.track !== a) {
       void audioSender.replaceTrack(a).catch((e) => console.warn('[rtc] audio replaceTrack failed:', e));
+    }
+    if (extraCamTransceiver && extraCamTransceiver.sender.track !== ec) {
+      void extraCamTransceiver.sender.replaceTrack(ec)
+        .catch((e) => console.warn('[rtc] extra-camera replaceTrack failed:', e));
     }
     if (screenAudioTransceiver && screenAudioTransceiver.sender.track !== sa) {
       void screenAudioTransceiver.sender.replaceTrack(sa)
@@ -74,10 +87,12 @@ export function startRtcSession(opts: {
   };
   const stopMediaListener = opts.media.onChange(syncSenders);
 
-  // Receiver side: publish the track for the <audio> sink. Volume-control
-  // visibility is driven by the peer's explicit 'screen-audio' app event
-  // (see main.ts); the RTP-driven mute/unmute events here are debug-mode
-  // probes confirming media actually flows.
+  // Receiver side: publish each extra track for its sink. Visibility is driven
+  // by the peer's explicit 'share' app event (see main.ts); the RTP-driven
+  // mute/unmute events here are only debug-mode probes.
+  function wireExtraCam(t: RTCRtpTransceiver): void {
+    store.set({ remoteExtraCameraTrack: t.receiver.track });
+  }
   function wireScreenAudio(t: RTCRtpTransceiver): void {
     const remoteScreenAudio = t.receiver.track;
     remoteScreenAudio.onunmute = () => {
@@ -88,25 +103,38 @@ export function startRtcSession(opts: {
     };
     store.set({ remoteScreenAudioTrack: remoteScreenAudio });
   }
+  if (extraCamTransceiver) wireExtraCam(extraCamTransceiver);
   if (screenAudioTransceiver) wireScreenAudio(screenAudioTransceiver);
-  // A share (with audio) may already be live from before this session started.
+  // A share may already be live from before this session started.
   syncSenders();
 
-  // Answerer half of the screen-audio slot: adopt the transceiver that
-  // setRemoteDescription(offer) just created for the third m-line. It's the
-  // audio transceiver that isn't the mic's. Runs before createAnswer so the
-  // sendrecv upgrade (Chrome spawns it recvonly) lands in the answer.
-  function adoptScreenAudioTransceiver(): void {
-    if (screenAudioTransceiver) return; // initiator, or already adopted
-    screenAudioTransceiver = pc.getTransceivers().find(
-      (t) => t.receiver.track.kind === 'audio' && t.sender !== audioSender
-    ) ?? null;
-    if (!screenAudioTransceiver) {
-      console.warn('[rtc] screen-audio transceiver missing from offer');
-      return;
+  // Answerer half: adopt the transceivers setRemoteDescription(offer) spawned
+  // for the extra m-lines — the video one that isn't the camera's main sender,
+  // and the audio one that isn't the mic's. Runs before createAnswer so the
+  // sendrecv upgrade (Chrome spawns them recvonly) lands in the answer.
+  function adoptExtraTransceivers(): void {
+    if (!extraCamTransceiver) {
+      extraCamTransceiver = pc.getTransceivers().find(
+        (t) => t.receiver.track.kind === 'video' && t.sender !== videoSender
+      ) ?? null;
+      if (extraCamTransceiver) {
+        extraCamTransceiver.direction = 'sendrecv';
+        wireExtraCam(extraCamTransceiver);
+      } else {
+        console.warn('[rtc] extra-camera transceiver missing from offer');
+      }
     }
-    screenAudioTransceiver.direction = 'sendrecv';
-    wireScreenAudio(screenAudioTransceiver);
+    if (!screenAudioTransceiver) {
+      screenAudioTransceiver = pc.getTransceivers().find(
+        (t) => t.receiver.track.kind === 'audio' && t.sender !== audioSender
+      ) ?? null;
+      if (screenAudioTransceiver) {
+        screenAudioTransceiver.direction = 'sendrecv';
+        wireScreenAudio(screenAudioTransceiver);
+      } else {
+        console.warn('[rtc] screen-audio transceiver missing from offer');
+      }
+    }
     syncSenders();
   }
 
@@ -186,7 +214,7 @@ export function startRtcSession(opts: {
           try { await pc.addIceCandidate(c); } catch (e) { console.warn('[rtc] queued ICE add failed:', e); }
         }
         if (msg.type === 'offer') {
-          adoptScreenAudioTransceiver(); // before createAnswer — see above
+          adoptExtraTransceivers(); // before createAnswer — see above
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           console.log('[rtc] signal OUT: answer');
@@ -237,6 +265,7 @@ export function startRtcSession(opts: {
     store.set({
       remoteStream: null, rtcConnected: false, connectionType: 'unknown',
       remoteScreenAudioTrack: null, remoteScreenAudioActive: false,
+      remoteExtraCameraTrack: null, remoteScreenCamActive: false,
     });
   }
 

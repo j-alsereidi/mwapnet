@@ -24,10 +24,11 @@ import type { IceServerConfig, PeerId } from './types.js';
 // warning in ingestSignal.
 type AppEvent =
   | { kind: 'app'; event: 'cam-on' }
-  // "My screen share carries audio" — drives the peer's volume-control
-  // visibility deterministically (the remote track's mute/unmute events are
-  // RTP-driven and unreliable for this).
-  | { kind: 'app'; event: 'screen-audio'; on: boolean };
+  // My current share state — whether my screen-share is carrying a camera PiP
+  // (`cam`) and/or audio (`audio`). Drives the peer's remote-camera PiP and
+  // screen-audio volume control deterministically; the RTP tracks' own
+  // mute/unmute events proved unreliable for visibility.
+  | { kind: 'app'; event: 'share'; cam: boolean; audio: boolean };
 function isAppEvent(data: unknown): data is AppEvent {
   return !!data && typeof data === 'object' && (data as { kind?: unknown }).kind === 'app';
 }
@@ -258,7 +259,7 @@ function handleServerMessage(msg: import('./types.js').ServerMessage): void {
       playPeerTransitionSound(prev, msg.state);
       reconcileRtc();
       // A peer who (re)connected or re-entered missed earlier announcements.
-      if (media.getScreenAudioTrack()) announceScreenAudio(true);
+      if (media.isScreenSharing()) announceShareState(true);
       break;
     }
 
@@ -390,6 +391,9 @@ function handleCamToggle(): void {
   if (wasOff && !nextOff && store.get().phase === 'room') {
     fireCamOn();
   }
+  // While sharing, the camera is the PiP the peer sees over your screen —
+  // toggling it changes what to announce.
+  if (media.isScreenSharing()) announceShareState();
 }
 
 function handleEnterRoom(): void {
@@ -426,9 +430,9 @@ function handleRemoteAppEvent(ev: AppEvent): void {
     // Only play if we're actually in the room — otherwise the chime is
     // disconnected from anything the user is seeing.
     if (store.get().phase === 'room') void playSound('cameraOn');
-  } else if (ev.event === 'screen-audio') {
-    store.set({ remoteScreenAudioActive: ev.on });
-    if (store.get().debugMode) showToast(`[debug] peer screen audio: ${ev.on ? 'on' : 'off'}`);
+  } else if (ev.event === 'share') {
+    store.set({ remoteScreenCamActive: ev.cam, remoteScreenAudioActive: ev.audio });
+    if (store.get().debugMode) showToast(`[debug] peer share — cam:${ev.cam} audio:${ev.audio}`);
   }
 }
 
@@ -501,17 +505,20 @@ function pushScreenStateToStore(): void {
   const track = media.getScreenTrack();
   const screenStream = sharing && track ? new MediaStream([track]) : null;
   store.set({ screenSharing: sharing, screenStream });
-  announceScreenAudio();
+  announceShareState();
 }
 
-// Tell the peer whether my share carries audio. Deduplicated, so it's cheap
-// to call from every media change; `force` re-sends for peers who missed it.
-let announcedScreenAudio = false;
-function announceScreenAudio(force = false): void {
-  const on = media.getScreenAudioTrack() !== null;
-  if (!force && on === announcedScreenAudio) return;
-  announcedScreenAudio = on;
-  signalClient?.send({ type: 'signal', data: { kind: 'app', event: 'screen-audio', on } });
+// Tell the peer what my share currently includes — a camera PiP (`cam`) and/or
+// audio. Deduplicated, so it's cheap to call from every media change; `force`
+// re-sends for a peer who (re)joined and missed the last announcement.
+let announcedShare = '';
+function announceShareState(force = false): void {
+  const cam = media.getExtraCameraTrack() !== null && !store.get().camOff;
+  const audio = media.getScreenAudioTrack() !== null;
+  const key = `${cam}/${audio}`;
+  if (!force && key === announcedShare) return;
+  announcedShare = key;
+  signalClient?.send({ type: 'signal', data: { kind: 'app', event: 'share', cam, audio } });
 }
 
 function fail(message: string): void {

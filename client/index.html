@@ -216,6 +216,30 @@
     #screen-pip:active { cursor: grabbing; }
     #screen-pip.hidden { display: none; }
 
+    /* While YOU share, your screen sits bottom-right (#screen-pip) and your
+       camera moves out of its way to bottom-left so both self-previews show. */
+    #local.with-screen { right: auto; left: 16px; }
+
+    /* ── Peer's camera PiP over their shared screen ─────────────────────────
+       The peer's #remote holds their screen while sharing; their camera rides
+       its own track and floats top-right as a rounded "presenter" tile. */
+    #remote-cam-pip {
+      position: absolute; top: 16px; right: 16px;
+      width: 160px;
+      aspect-ratio: 16 / 9;
+      border-radius: 10px;
+      object-fit: cover;
+      background: #000;
+      cursor: grab; z-index: 11;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,255,255,0.12);
+      touch-action: none;
+      -webkit-user-select: none; user-select: none;
+    }
+    @media (min-width: 768px) { #remote-cam-pip { width: 220px; } }
+    #remote-cam-pip:active { cursor: grabbing; }
+    #remote-cam-pip.hidden { display: none; }
+
     /* ── Peer screen-share audio control ────────────────────────────────
        Volume slider + mute toggle for the peer's share audio, shown only
        while their share is actually carrying audio. Horizontal above the
@@ -682,6 +706,7 @@
   <!-- Room -->
   <div id="screen-room" class="screen">
     <video id="remote" autoplay playsinline></video>
+    <video id="remote-cam-pip" class="hidden" autoplay playsinline></video>
     <video id="local" autoplay playsinline muted></video>
     <video id="screen-pip" class="hidden" autoplay playsinline muted></video>
 

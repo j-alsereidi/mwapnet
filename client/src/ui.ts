@@ -48,6 +48,7 @@ interface Dom {
   screens: Record<'connecting' | 'lobby' | 'room' | 'failed' | 'auth', HTMLElement>;
   lobbyPreview:  HTMLVideoElement;
   remoteVideo:   HTMLVideoElement;
+  remoteCamPip:  HTMLVideoElement;
   localVideo:    HTMLVideoElement;
   screenPip:     HTMLVideoElement;
   cameraPicker:  HTMLSelectElement;
@@ -116,6 +117,7 @@ export function mountUi(handlers: UiHandlers): void {
     },
     lobbyPreview:  document.getElementById('lobby-preview') as HTMLVideoElement,
     remoteVideo:   document.getElementById('remote')        as HTMLVideoElement,
+    remoteCamPip:  document.getElementById('remote-cam-pip') as HTMLVideoElement,
     localVideo:    document.getElementById('local')         as HTMLVideoElement,
     screenPip:     document.getElementById('screen-pip')    as HTMLVideoElement,
     cameraPicker:  document.getElementById('camera-picker') as HTMLSelectElement,
@@ -336,6 +338,7 @@ export function mountUi(handlers: UiHandlers): void {
   setupRoomControlAutoFade();
   setupPipDrag(dom.localVideo);
   setupPipDrag(dom.screenPip);
+  setupPipDrag(dom.remoteCamPip);
   setupRemoteZoom(dom.remoteVideo);
   setupLocalAspectSync();
 
@@ -653,14 +656,14 @@ function render(s: ClientState): void {
   }
 
   // ── Camera PiP visibility (#local) ────────────────────────────────────
-  // Only ever shows the camera, never the screenshare. Hidden when:
-  //   - not in the room
-  //   - camera off (nothing to show)
-  //   - screensharing (screen-pip takes over the slot)
-  //   - user toggled "Hide my camera" in settings
+  // Always the camera (its stream never holds the screen — see media.ts).
+  // Shows whenever the camera's on, INCLUDING while sharing: then it sits
+  // bottom-left (.with-screen) so it clears the screen preview bottom-right.
+  // Hidden when: not in the room / camera off / "Hide my camera".
   const showLocal =
-    s.phase === 'room' && !s.camOff && !s.screenSharing && !s.hideSelfView;
+    s.phase === 'room' && !s.camOff && !s.hideSelfView;
   dom.localVideo.classList.toggle('hidden', !showLocal);
+  dom.localVideo.classList.toggle('with-screen', s.screenSharing);
   if (lastLocalHidden && showLocal) {
     void dom.localVideo.play().catch(() => {});
   }
@@ -671,6 +674,9 @@ function render(s: ClientState): void {
   // nothing in the camera-side logic (track-id tracking, srcObject swaps,
   // hide class on #local) can interfere with screenshare display.
   renderScreenPip(s);
+
+  // ── Peer's camera PiP over their shared screen (#remote-cam-pip) ──────
+  renderRemoteCamPip(s);
 
   // ── Peer's screen-share audio ─────────────────────────────────────────
   // Dedicated <audio> sink (separate from #remote, which carries their
@@ -790,6 +796,31 @@ function renderScreenPip(s: ClientState): void {
     if (lastScreenStreamId) {
       el.srcObject = null;
       lastScreenStreamId = null;
+    }
+  }
+}
+
+// The peer's camera while they screen-share. Its own track (remoteExtraCamera)
+// with its own MediaStream, so it's independent of #remote's screen feed.
+// Visibility follows the peer's explicit 'share' announcement.
+let lastRemoteCamTrack: MediaStreamTrack | null = null;
+function renderRemoteCamPip(s: ClientState): void {
+  const el = dom.remoteCamPip;
+  const show = s.phase === 'room' && s.rtcConnected &&
+    s.remoteScreenCamActive && !!s.remoteExtraCameraTrack;
+
+  if (show && s.remoteExtraCameraTrack) {
+    if (s.remoteExtraCameraTrack !== lastRemoteCamTrack) {
+      el.srcObject = new MediaStream([s.remoteExtraCameraTrack]);
+      lastRemoteCamTrack = s.remoteExtraCameraTrack;
+      void el.play().catch(() => {});
+    }
+    el.classList.remove('hidden');
+  } else {
+    el.classList.add('hidden');
+    if (lastRemoteCamTrack) {
+      el.srcObject = null;
+      lastRemoteCamTrack = null;
     }
   }
 }

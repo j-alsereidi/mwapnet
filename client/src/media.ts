@@ -25,9 +25,16 @@ export class MediaManager {
     return this.stream;
   }
 
-  // Returns the track currently in the "video" slot — could be camera or screen.
+  // The MAIN outgoing video: screen when sharing, else camera.
   getVideoTrack(): MediaStreamTrack | null {
     return this.screenTrack ?? this.cameraTrack;
+  }
+
+  // The camera as a SECOND outgoing video, sent only while also screen-sharing
+  // (otherwise the camera is already the main track). Lets the peer show
+  // screen + camera at once.
+  getExtraCameraTrack(): MediaStreamTrack | null {
+    return this.screenTrack && this.cameraTrack ? this.cameraTrack : null;
   }
 
   getAudioTrack(): MediaStreamTrack | null {
@@ -166,12 +173,16 @@ export class MediaManager {
     this.listeners.clear();
   }
 
-  // Sync the MediaStream's tracks to match our current selection.
-  // We keep the SAME MediaStream object — video elements bound to it just work.
+  // Sync the local-preview MediaStream. It carries the CAMERA (never the
+  // screen) so #local shows your face even while you share — the screen has
+  // its own preview element (#screen-pip). The same object identity is kept
+  // so bound video elements don't need re-attaching. This stream is also the
+  // msid association for the RTP senders; the actual sent tracks are chosen
+  // by getVideoTrack()/getExtraCameraTrack() via replaceTrack, independent of
+  // membership here.
   private rebuildStream(): void {
     for (const t of this.stream.getTracks()) this.stream.removeTrack(t);
-    const video = this.screenTrack ?? this.cameraTrack;
-    if (video) this.stream.addTrack(video);
+    if (this.cameraTrack) this.stream.addTrack(this.cameraTrack);
     if (this.audioTrack) this.stream.addTrack(this.audioTrack);
   }
 }

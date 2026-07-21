@@ -35,13 +35,19 @@ export interface ClientState {
   screenSharing: boolean;
 
   // The PEER's screen-share audio (set by rtcSession from its dedicated
-  // transceiver). `Active` mirrors the track's unmute/mute — i.e. whether
-  // their share actually carries audio right now. Volume/mute are local,
-  // session-only listener controls; they never affect the peer's voice.
+  // transceiver). `Active` mirrors the peer's explicit 'share' announcement —
+  // i.e. whether their share actually carries audio right now. Volume/mute are
+  // local, session-only listener controls; they never affect the peer's voice.
   remoteScreenAudioTrack: MediaStreamTrack | null;
   remoteScreenAudioActive: boolean;
   screenAudioVolume: number; // 0-100
   screenAudioMuted: boolean;
+
+  // The PEER's camera while they screen-share (their own dedicated video
+  // transceiver). Shown as a PiP over their screen; `Active` follows their
+  // 'share' announcement (sharing with camera on).
+  remoteExtraCameraTrack: MediaStreamTrack | null;
+  remoteScreenCamActive: boolean;
 
   cameras: CameraOption[];
   currentCameraId: string | null;
