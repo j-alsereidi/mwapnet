@@ -664,6 +664,15 @@ function render(s: ClientState): void {
     s.phase === 'room' && !s.camOff && !s.hideSelfView;
   dom.localVideo.classList.toggle('hidden', !showLocal);
   dom.localVideo.classList.toggle('with-screen', s.screenSharing);
+
+  // Mirror the self-view for front cameras only. The device label is the one
+  // signal available here — Android reports "camera 2, facing back". Anything
+  // we can't identify (desktop webcams) stays mirrored, as before.
+  const rearCam = /\b(back|rear|environment)\b/i.test(
+    s.cameras.find((c) => c.deviceId === s.currentCameraId)?.label ?? ''
+  );
+  dom.localVideo.classList.toggle('rear', rearCam);
+  dom.lobbyPreview.classList.toggle('rear', rearCam);
   if (lastLocalHidden && showLocal) {
     void dom.localVideo.play().catch(() => {});
   }

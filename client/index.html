@@ -189,8 +189,9 @@
       #local { width: 240px; bottom: 96px; }
     }
     #local:active { cursor: grabbing; }
-    /* Don't mirror the local view while screensharing — the user wants to read text */
-    #local.screen { transform: none; }
+    /* A rear camera points at the world, not at you — mirroring it reverses
+       any text in frame. Front camera self-view stays mirrored. */
+    #local.rear, #lobby-preview.rear { transform: none; }
 
     /* ── Screenshare PiP ────────────────────────────────────────────────
        A SEPARATE video element from #local. Same on-screen position and
