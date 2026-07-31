@@ -60,8 +60,8 @@ services:
       --external-ip=${PUBLIC_TURN_HOST}
       --min-port=49160
       --max-port=49200
-      --total-quota=4
-      --user-quota=2
+      --total-quota=16
+      --user-quota=8
       --no-multicast-peers
       --no-cli
       --fingerprint

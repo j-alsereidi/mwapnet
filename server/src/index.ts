@@ -13,7 +13,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 async function main() {
   const app = express();
 
-  app.use((_req, res, next) => {
+  app.use((req, res, next) => {
+    // CORS: the native apps (tauri://localhost, capacitor webviews) fetch
+    // /ice-config cross-origin with an Authorization header, which triggers
+    // a preflight. Without these headers the fetch throws and the client
+    // silently degrades to STUN-only — no relay, so restrictive networks
+    // can never connect. Auth is bearer-token, not cookies, so '*' is safe.
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    if (req.method === 'OPTIONS') { res.sendStatus(204); return; }
     res.setHeader(
       'Content-Security-Policy',
       "default-src 'self'; media-src 'self' blob:; connect-src 'self' wss: https:; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"

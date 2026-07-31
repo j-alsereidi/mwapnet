@@ -38,6 +38,7 @@ const media = new MediaManager();
 let signalClient: SignalClient | null = null;
 let rtcSession: RtcSession | null = null;
 let iceConfig: IceServerConfig | null = null;
+let refreshIceConfig: (() => Promise<IceServerConfig>) | null = null;
 let peerId: PeerId | null = null;
 // Signal messages that arrive before rtcSession exists get held here
 const queuedSignals: unknown[] = [];
@@ -227,10 +228,16 @@ async function bootstrap(): Promise<void> {
   const baseUrl = await getServerBaseUrl();
 
   // 4. ICE servers. Failure here is non-fatal — fall back to public STUN.
+  // TURN credentials expire (600s TTL), so reconcileRtc() refetches through
+  // this closure at every call start; fetchIceConfig caches within the TTL.
+  refreshIceConfig = () => fetchIceConfig({ baseUrl, pairSecret });
   try {
-    iceConfig = await fetchIceConfig({ baseUrl, pairSecret });
+    iceConfig = await refreshIceConfig();
   } catch (err) {
     console.warn('[main] ICE config fetch failed, using STUN-only fallback:', err);
+    // Surface the degradation — silent STUN-only mode looks identical to a
+    // healthy app until a restrictive network fails to connect.
+    showToast('Warning: relay server unreachable — calls may fail on some networks');
     iceConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], ttlSeconds: 600 };
   }
 
@@ -347,21 +354,35 @@ function setMyState(state: 'lobby' | 'room'): void {
  * The only place the RTC session is created or destroyed.
  * Active iff *both* peers are in 'room'.
  */
+let rtcStarting = false;
 function reconcileRtc(): void {
   const s = store.get();
   const shouldRun = s.phase === 'room' && s.peerPresence === 'room';
 
-  if (shouldRun && !rtcSession) {
+  if (shouldRun && !rtcSession && !rtcStarting) {
     if (!peerId || !signalClient || !iceConfig) return;
-    console.log('[main] starting RTC session');
-    rtcSession = startRtcSession({
-      initiator: peerId === 'A', // Slot A always offers — deterministic, eliminates glare
-      media,
-      iceConfig,
-      signal: signalClient,
-    });
-    // Deliver any signal messages that landed before the session existed
-    while (queuedSignals.length) rtcSession.ingestSignal(queuedSignals.shift());
+    rtcStarting = true;
+    void (async () => {
+      // Refresh TURN credentials at call start — the boot-time config goes
+      // stale after its 600s TTL and coturn rejects expired credentials,
+      // which silently kills relay candidates. Cached within TTL, so this
+      // is a no-op for back-to-back calls. On failure keep the last config.
+      try { iceConfig = await refreshIceConfig!(); }
+      catch (err) { console.warn('[main] ICE config refresh failed, using previous:', err); }
+      rtcStarting = false;
+      const now = store.get();
+      if (rtcSession || now.phase !== 'room' || now.peerPresence !== 'room') return;
+      if (!peerId || !signalClient || !iceConfig) return;
+      console.log('[main] starting RTC session');
+      rtcSession = startRtcSession({
+        initiator: peerId === 'A', // Slot A always offers — deterministic, eliminates glare
+        media,
+        iceConfig,
+        signal: signalClient,
+      });
+      // Deliver any signal messages that landed before the session existed
+      while (queuedSignals.length) rtcSession.ingestSignal(queuedSignals.shift());
+    })();
   } else if (!shouldRun && rtcSession) {
     console.log('[main] tearing down RTC session');
     rtcSession.destroy();

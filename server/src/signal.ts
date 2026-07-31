@@ -154,8 +154,13 @@ export function mountSignal(server: Server): void {
           break;
         }
         case 'signal': {
-          // Pure relay — clients decide when sending signals is meaningful
+          // Pure relay — clients decide when sending signals is meaningful.
+          // Log the inner kind: an offer/answer/ice trace is the only server-
+          // side visibility into why a pair fails to link up.
           const other = otherSocket(peerId);
+          const d = msg.data as { type?: string; candidate?: unknown } | null;
+          const kind = d?.type ?? (d && d.candidate !== undefined ? 'ice' : '?');
+          console.log(`[signal] ${peerId} sig ${kind} ${other ? 'relayed' : 'DROPPED (peer offline)'}`);
           if (other) sendJson(other, msg);
           break;
         }
