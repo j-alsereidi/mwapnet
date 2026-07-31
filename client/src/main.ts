@@ -203,15 +203,20 @@ async function bootstrap(): Promise<void> {
   try {
     await media.acquire();
   } catch (err) {
+    const name = (err as Error).name;
     return fail(
-      (err as Error).name === 'NotFoundError'
-        ? 'No camera or mic detected.'
-        : 'MWAPNET needs camera and mic to work.'
+      name === 'NotFoundError'    ? 'No camera or mic detected.' :
+      name === 'NotReadableError' ? 'Camera or mic is already in use by another app.' :
+      'MWAPNET needs camera and mic to work.'
     );
   }
 
   // Reflect the acquired stream into the store + enumerate cameras
   store.set({ localStream: media.getStream(), currentCameraId: media.currentCamera() });
+  // Re-apply mute state: on the path where acquire() had to open fresh tracks,
+  // they come back enabled and would silently unmute a retry mid-call.
+  media.setMicMuted(store.get().micMuted);
+  media.setCamOff(store.get().camOff);
 
   // Keep the dedicated screen stream in sync whenever media changes — covers
   // the case where the user stops sharing via the OS bar (which fires the

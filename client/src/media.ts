@@ -66,8 +66,24 @@ export class MediaManager {
     for (const fn of this.listeners) fn(this.stream);
   }
 
-  /** First-time acquisition — call after user gesture. */
+  /** Acquire camera + mic. Call after a user gesture. Re-entrant: the retry
+   *  paths (Try Again, settings save) call this again while the previous
+   *  tracks are still live, and re-requesting a device this page already
+   *  holds fails with NotReadableError on mobile and WebView2 — the same
+   *  "one open at a time" limit switchCamera() stops the old track for.
+   *  So reuse live tracks instead of reopening; that also keeps mute /
+   *  cam-off state and the chosen device across a retry. */
   async acquire(): Promise<void> {
+    if (this.cameraTrack?.readyState === 'live' && this.audioTrack?.readyState === 'live') {
+      this.emit();
+      return;
+    }
+    // One of them is dead or was never granted. Release both before asking
+    // again — a single getUserMedia call replaces the pair anyway, and the
+    // old handles must be closed first or the re-request hits the same limit.
+    this.cameraTrack?.stop();
+    this.audioTrack?.stop();
+    this.cameraTrack = this.audioTrack = null;
     const media = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
     this.cameraTrack = media.getVideoTracks()[0] ?? null;
     this.audioTrack  = media.getAudioTracks()[0] ?? null;
